@@ -1,0 +1,6 @@
+{
+  "platform": "next",
+  "app": "yara",
+  "port": 3000,
+  "disks": [{ "name": "data", "mountTo": "data" }]
+}
