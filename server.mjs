@@ -56,14 +56,22 @@ function redeemTicket(ticket) {
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 });
 
 wss.on("connection", (client, _req, session) => {
-  // Liara's app images consistently provide POSIX sh; bash is optional and a
-  // missing binary makes the exec service close the WebSocket immediately.
-  const url = `${LIARA_EXEC}?token=${encodeURIComponent(session.token)}&cmd=${encodeURIComponent("/bin/sh")}&project_id=${encodeURIComponent(session.app)}&teamID=${encodeURIComponent(session.team)}`;
+  // Match `liara app:shell`'s default interactive shell.
+  const url = `${LIARA_EXEC}?token=${encodeURIComponent(session.token)}&cmd=${encodeURIComponent("/bin/bash")}&project_id=${encodeURIComponent(session.app)}&teamID=${encodeURIComponent(session.team)}`;
   const upstream = new WebSocket(url);
   const pending = [];
+  let upstreamReady = false;
+  let readyTimer;
 
   upstream.on("open", () => {
-    for (const m of pending.splice(0)) upstream.send(m);
+    // Liara's CLI waits one second after the WebSocket opens before sending
+    // `action: start`. Sending it immediately intermittently closes the exec
+    // session before its PTY is ready.
+    readyTimer = setTimeout(() => {
+      upstreamReady = true;
+      if (client.readyState !== WebSocket.OPEN || upstream.readyState !== WebSocket.OPEN) return;
+      for (const m of pending.splice(0)) upstream.send(m);
+    }, 1_000);
   });
   upstream.on("message", (data) => {
     if (client.readyState === WebSocket.OPEN) client.send(data, { binary: false });
@@ -72,8 +80,12 @@ wss.on("connection", (client, _req, session) => {
     const reason = res.statusCode === 404 ? "app-not-found" : res.statusCode === 401 ? "unauthorized" : `upstream-${res.statusCode}`;
     client.close(4000, reason);
   });
-  upstream.on("error", () => client.readyState === WebSocket.OPEN && client.close(4001, "upstream-error"));
+  upstream.on("error", () => {
+    clearTimeout(readyTimer);
+    if (client.readyState === WebSocket.OPEN) client.close(4001, "upstream-error");
+  });
   upstream.on("close", (code, reason) => {
+    clearTimeout(readyTimer);
     if (client.readyState !== WebSocket.OPEN) return;
     const detail = reason.toString().slice(0, 100);
     console.warn(`[shell] upstream closed (${code})${detail ? `: ${detail}` : ""}`);
@@ -82,10 +94,13 @@ wss.on("connection", (client, _req, session) => {
 
   client.on("message", (data) => {
     const text = data.toString();
-    if (upstream.readyState === WebSocket.OPEN) upstream.send(text);
+    if (upstreamReady && upstream.readyState === WebSocket.OPEN) upstream.send(text);
     else pending.push(text);
   });
-  client.on("close", () => upstream.close());
+  client.on("close", () => {
+    clearTimeout(readyTimer);
+    upstream.close();
+  });
 });
 
 // ---- local runners (runner/yara-runner.mjs) ----
