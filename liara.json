@@ -1,6 +1,7 @@
 {
-  "platform": "next",
-  "app": "yara",
+  "platform": "node",
+  "app": "yarayara",
   "port": 3000,
+  "node": { "version": 22 },
   "disks": [{ "name": "data", "mountTo": "data" }]
 }
