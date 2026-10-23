@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { bytesFa, faDigits, relativeFa } from "@/lib/fa";
 import { fixRequest, IncidentBanner } from "./Health";
+import { GettingStarted } from "./NextSteps";
 import { appStatus, useWorkbench } from "./Workbench";
 
 type Row = {
@@ -123,6 +124,8 @@ export function Overview() {
           {counts.failed > 0 && <span className="bad">{faDigits(counts.failed)} استقرار ناموفق اخیر</span>}
         </p>
       )}
+
+      {rows && <GettingStarted deployed={rows.some((r) => r.release?.state === "READY")} firstApp={rows[0]?.name} />}
 
       <IncidentBanner
         incidents={wb.incidents}

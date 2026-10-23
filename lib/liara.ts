@@ -135,7 +135,40 @@ export type Project = {
   reservedDiskSpace?: number;
 };
 
-export type LogLine = { type: string; datetime: string; message: string };
+export type LogLine = { type: string; datetime: string; message: string; releaseId?: string };
+
+type LogsV2 = { data?: { metaData?: { releaseId?: string }; values?: [string, string][] }[] };
+
+/**
+ * App logs since `sinceSec`, oldest first, the way `liara logs` (CLI 9.x) reads them.
+ * The old `/v1/projects/{app}/logs` now answers with a single "please upgrade your client" line instead of logs.
+ * v2 returns pages going forward from `start`, in groups per release whose values are
+ * [nanosecond timestamp, JSON {"_entry", "type"}]; we page forward until we catch up with now.
+ */
+export async function getAppLogs(c: LiaraClient, app: string, sinceSec: number, maxPages = 10): Promise<LogLine[]> {
+  const out: LogLine[] = [];
+  let start = sinceSec;
+  for (let page = 0; page < maxPages && start <= nowSec(); page++) {
+    const res = await c.get<LogsV2>(`/v2/projects/${enc(app)}/logs`, { start, direction: "forward" });
+    const lines = (res?.data ?? []).flatMap((g) =>
+      (g.values ?? []).map(([ts, raw]) => {
+        let entry: { _entry?: string; type?: string } = {};
+        try {
+          entry = JSON.parse(raw);
+        } catch {
+          entry = { _entry: raw };
+        }
+        return { ns: BigInt(ts), line: { type: entry.type ?? "stdout", datetime: new Date(Number(BigInt(ts) / 1_000_000n)).toISOString(), message: entry._entry ?? "", releaseId: g.metaData?.releaseId } };
+      }),
+    );
+    if (!lines.length) break;
+    // Groups are sorted internally but not with each other.
+    lines.sort((a, b) => (a.ns < b.ns ? -1 : a.ns > b.ns ? 1 : 0));
+    out.push(...lines.map((l) => l.line));
+    start = Number(lines[lines.length - 1].ns / 1_000_000_000n) + 1;
+  }
+  return out;
+}
 
 export type Reports = { end?: number; result?: { applet?: string; values: [number | string, number | string][] }[] };
 
@@ -149,16 +182,41 @@ export function maskEnvs(envs: Env[] = []) {
   }));
 }
 
+/**
+ * Metrics come back one series per container ("applet" `<id>.<slot>.<task>`), and every restart or redeploy
+ * starts a new container, so a few restarts leave several dead series behind. Keep the one serving now.
+ * Series of dead containers can run up to the end of the range too, so "reported last" ties; among the series
+ * still reporting at the end, the current container is the one that started most recently.
+ */
+export function latestInstance(r: Reports): Reports {
+  const spans = (r.result ?? [])
+    .map((s) => {
+      const ts = s.values.map(([t]) => Number(t)).filter(Number.isFinite);
+      return { s, first: ts.length ? Math.min(...ts) : -Infinity, last: ts.length ? Math.max(...ts) : -Infinity };
+    })
+    .filter((x) => x.last > -Infinity);
+  if (spans.length < 2) return r;
+  const end = Math.max(...spans.map((x) => x.last));
+  // A couple of scrape intervals of slack, so jitter in the final sample does not decide it.
+  const reporting = spans.filter((x) => end - x.last <= 120);
+  const current = reporting.reduce((a, b) => (b.first > a.first || (b.first === a.first && b.last > a.last) ? b : a));
+  return { ...r, result: [current.s] };
+}
+
 /** Collapse a time series into numbers a model can reason about. */
 export function summarizeSeries(r: Reports) {
   return (r.result ?? []).map((s) => {
-    const nums = s.values.map(([, v]) => Number(v)).filter((n) => Number.isFinite(n));
+    const pts = s.values.map(([t, v]) => [Number(t), Number(v)]).filter(([t, v]) => Number.isFinite(t) && Number.isFinite(v));
+    const nums = pts.map(([, v]) => v);
     if (!nums.length) return { applet: s.applet, points: 0 };
     const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
     const round = (n: number) => Math.round(n * 1000) / 1000;
     return {
       applet: s.applet,
       points: nums.length,
+      // Unix seconds the series covers; a container started mid-window covers less than the window.
+      from: pts[0][0],
+      to: pts[pts.length - 1][0],
       last: round(nums[nums.length - 1]),
       min: round(Math.min(...nums)),
       avg: round(avg),

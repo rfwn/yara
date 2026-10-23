@@ -5,7 +5,7 @@ import { readDocsPage, searchDocs } from "./docs";
 import { listVMs, resolveVM, vmDetails, vmOperations, vmTraffic, VM_API_LIMITS } from "./vms";
 import { diagnose } from "./monitor/diagnose";
 import { gatherEvidence } from "./monitor/evidence";
-import { enc, LiaraError, maskEnvs, withKeyVariants, nowSec, summarizeSeries, type LiaraClient, type LogLine, type Project, type Reports } from "./liara";
+import { enc, getAppLogs, LiaraError, maskEnvs, withKeyVariants, nowSec, latestInstance, summarizeSeries, type LiaraClient, type Project, type Reports } from "./liara";
 
 const app = z.string().min(1).describe("App name (project_id)");
 const ERROR_LINE = /error|exception|traceback|fatal|panic|killed|oom|refused|timeout|ECONN|EADDRINUSE|cannot find module|segfault|502|503/i;
@@ -42,8 +42,7 @@ function compactPlans(plans: unknown) {
 }
 
 async function fetchLogs(c: LiaraClient, name: string, minutes: number, limit: number, errorsOnly = false) {
-  const lines = await c.get<LogLine[]>(`/v1/projects/${enc(name)}/logs`, { since: nowSec() - minutes * 60 });
-  const all = Array.isArray(lines) ? lines : [];
+  const all = await getAppLogs(c, name, nowSec() - minutes * 60);
   const errors = all.filter((l) => l.type === "stderr" || ERROR_LINE.test(l.message));
   const picked = (errorsOnly ? errors : all).slice(-limit).map((l) => ({
     t: l.datetime,
@@ -55,7 +54,7 @@ async function fetchLogs(c: LiaraClient, name: string, minutes: number, limit: n
 
 async function fetchMetric(c: LiaraClient, base: string, metric: string, hours: number) {
   const r = await c.get<Reports>(`${base}/metrics/${metric}`, { since: nowSec() - hours * 3600 });
-  return { metric, windowHours: hours, series: summarizeSeries(r) };
+  return { metric, windowHours: hours, containers: r.result?.length ?? 0, series: summarizeSeries(latestInstance(r)) };
 }
 
 export function readTools(c: LiaraClient) {

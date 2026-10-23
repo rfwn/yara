@@ -3,7 +3,10 @@
 import { ArrowDownToLine, Pause, Play } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type Line = { type: string; datetime: string; message: string };
+type Line = { type: string; datetime: string; message: string; release?: string };
+
+// Local wall-clock time, as the Liara console shows it (the API timestamps are UTC).
+const clock = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("en-GB", { hour12: false }) : "");
 
 const ERROR_LINE = /error|exception|traceback|fatal|panic|killed|oom|refused|timeout|ECONN|EADDRINUSE/i;
 
@@ -81,7 +84,8 @@ export function LogsPane({ app, active }: { app: string; active: boolean }) {
         ) : (
           shown.map((l, i) => (
             <div key={i} className={l.type === "stderr" || ERROR_LINE.test(l.message) ? "err" : undefined}>
-              <span className="ts">{l.datetime?.slice(11, 19)}</span>
+              {l.release && <span className="ts">{l.release}</span>}
+              <span className="ts">{clock(l.datetime)}</span>
               {l.message}
             </div>
           ))

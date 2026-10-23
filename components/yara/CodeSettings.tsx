@@ -125,9 +125,9 @@ export function CodeSettings({ hasGithub, hasRunnerToken }: { hasGithub: boolean
           </div>
         </form>
 
-        <div className="set-row" style={{ alignItems: "start" }}>
+        <div className="set-row" id="runner" style={{ alignItems: "start", scrollMarginTop: 16 }}>
           <div>
-            <div className="t">پوشه‌ی روی رایانه‌ی شما</div>
+            <div className="t">پوشه‌ی روی رایانه‌ی شما (پیشنهادی)</div>
             <div className="d">
               رانر یارا را در پوشه‌ی پروژه اجرا کنید تا عامل‌ها همان‌جا بخوانند، بیلد بگیرند و (با تأیید شما) ویرایش کنند. فقط همان پوشه در دسترس است و کلیدهای شما به فرمان‌ها منتقل نمی‌شوند.
               {hasRunnerToken && !token && " توکن قبلی همچنان کار می‌کند؛ ساختن توکن تازه آن را باطل می‌کند."}

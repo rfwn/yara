@@ -618,7 +618,7 @@ export const AGENT_TOOLS = {
     ...ws(["listWorkspaces", "listFiles", "readFile", "searchCode", "detectProject", "runCommand", "writeFile", "editFile", "gitChanges"]),
     ...deployTools,
     ...pick(liaraReadTools, ["listApps", "getApp", "getAppReleases", "getAppLogs", "getAppEvents", "diagnoseApp", "searchLiaraDocs", "readLiaraDocsPage"]),
-    ...pick(liaraActionTools, ["setEnvVars", "createApp", "createDisk", "setAppFeature", "restartApp"]),
+    ...pick(liaraActionTools, ["setEnvVars", "createApp", "createDisk", "setAppFeature", "restartApp", "createDnsZone", "createDnsRecord"]),
     recommendAppPlanTool,
     rollbackChange,
     getPlatformLimits,

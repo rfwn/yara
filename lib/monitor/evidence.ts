@@ -1,7 +1,7 @@
 // Collects everything the diagnosis rules look at, for one app, in parallel.
 // Shared by the background monitor and the agents' diagnoseApp/probeApp tools.
 
-import { enc, nowSec, summarizeSeries, type LiaraClient, type LogLine, type Project, type Reports } from "../liara";
+import { enc, getAppLogs, latestInstance, nowSec, summarizeSeries, type LiaraClient, type Project, type Reports } from "../liara";
 import { appPlanOptions, type AppPlan } from "../plans";
 import { probeTwice, safePath, type Probe } from "./probe";
 
@@ -41,7 +41,7 @@ const settle = async <T>(p: Promise<T>, gaps: string[], what: string): Promise<T
 };
 
 const series = (r: Reports | null): Series => {
-  const s = r ? summarizeSeries(r)[0] : undefined;
+  const s = r ? summarizeSeries(latestInstance(r))[0] : undefined;
   return s && "last" in s ? { last: s.last as number, avg: s.avg as number, max: s.max as number, samples: (s.samples as number[]) ?? [] } : null;
 };
 
@@ -75,7 +75,7 @@ export async function gatherEvidence(c: LiaraClient, app: string, opts: { path?:
     on && url ? probeTwice(url) : null,
     on ? settle(c.get<Reports>(`${base}/metrics/cpu`, { since }), gaps, "cpu") : null,
     on ? settle(c.get<Reports>(`${base}/metrics/memory`, { since }), gaps, "memory") : null,
-    on ? settle(c.get<LogLine[]>(`${base}/logs`, { since: nowSec() - logMinutes * 60 }), gaps, "logs") : null,
+    on ? settle(getAppLogs(c, app, nowSec() - logMinutes * 60), gaps, "logs") : null,
     settle(c.get<any>(`${base}/releases`, { page: 1, count: 1 }), gaps, "releases"),
     settle(c.get<any>(`${base}/events`, { start: nowSec() - 3600, end: nowSec() }), gaps, "events"),
     opts.plans !== undefined ? opts.plans : settle(appPlanOptions(c).then((x) => x.appPlans), gaps, "plans"),

@@ -52,6 +52,10 @@ export function DeployDialog({ apps, onUploaded, onClose }: { apps: AppSummary[]
           </button>
         </div>
         <div className="dialog-body">
+          <p className="hint ns-tip">
+            <b>راه بهتر: رانر یارا.</b> با <code className="ltr">npx yara-runner</code> در پوشه‌ی پروژه، یارا کد را می‌خواند، بیلد می‌گیرد و اگر خطا داد درستش می‌کند؛ با فایل فشرده فقط یک‌بار
+            مستقر می‌شود. <a href="/app/settings#runner" className="link">راه‌اندازی رانر</a>
+          </p>
           <p className="hint">
             از پروژه‌تان یک فایل فشرده بسازید، مثلاً:{" "}
             <code className="ltr">tar --exclude=node_modules --exclude=.git -czf app.tar.gz .</code>

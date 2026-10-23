@@ -1,10 +1,11 @@
 "use client";
 
-import { Bot, ExternalLink, RefreshCw, RotateCw, ScrollText, SquareTerminal } from "lucide-react";
+import { Bot, ExternalLink, Power, RefreshCw, RotateCw, ScrollText, SquareTerminal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { faDigits, relativeFa } from "@/lib/fa";
 import { fixRequest, IncidentBanner } from "./Health";
-import { MetricView } from "./Evidence";
+import { AppNextSteps } from "./NextSteps";
+import { ResourceUsage } from "./Usage";
 import { appStatus, useWorkbench } from "./Workbench";
 
 type Detail = {
@@ -19,6 +20,8 @@ type Detail = {
   env: { key: string; value: string }[];
   cpu: any[];
   memory: any[];
+  cpuLimit: number | null;
+  memLimit: number | null;
   releases: { id: string; state: string; at: string; port: number; message: string | null; commit: string | null; client: string }[];
   domains: { name: string; status: string; ssl: string }[];
 };
@@ -179,18 +182,20 @@ export function AppDashboard({ name }: { name: string }) {
         </div>
       ) : (
         <>
+          <AppNextSteps app={{ name, on: d.on, deployed: d.releases.some((r) => r.state === "READY"), zeroDowntime: d.zeroDowntime, domains: d.domains }} />
+
           <section className="box">
             <h2>
               مصرف منابع <span className="faint small">۶ ساعت اخیر</span>
             </h2>
-            <div className="body" style={{ display: "grid", gap: 12 }}>
+            <div className="body">
               {d.on ? (
-                <>
-                  <MetricView metric="cpu" series={d.cpu} />
-                  <MetricView metric="memory" series={d.memory} />
-                </>
+                <ResourceUsage cpu={d.cpu} memory={d.memory} cpuLimit={d.cpuLimit} memLimit={d.memLimit} />
               ) : (
-                <p className="muted">برنامه خاموش است.</p>
+                <p className="usage-off">
+                  <Power size={15} aria-hidden />
+                  برنامه خاموش است؛ با روشن شدن، مصرف پردازنده و حافظه اینجا دیده می‌شود.
+                </p>
               )}
             </div>
           </section>

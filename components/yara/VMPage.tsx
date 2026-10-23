@@ -2,6 +2,7 @@
 
 import { Bot, Info, Power, RefreshCw, RotateCw, Server } from "lucide-react";
 import { faDigits, relativeFa } from "@/lib/fa";
+import { VmNextSteps } from "./NextSteps";
 import { Skeleton, useDetail } from "./ResourcePages";
 import { useWorkbench } from "./Workbench";
 
@@ -105,6 +106,7 @@ export function VMPage({ id }: { id: string }) {
         <Skeleton />
       ) : (
         <>
+          <VmNextSteps vm={name} on={on} />
           <section className="box">
             <h2>مشخصات</h2>
             <dl className="vm-specs">

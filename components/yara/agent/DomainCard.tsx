@@ -12,11 +12,22 @@ type Guide = {
   apex: boolean;
   registrar: { name: string; panel: string | null; howTo: string[] };
   liara: { dnsZone?: { fromApi: boolean } };
+  dns?: { mode: "liara-active" | "liara-pending" | "external"; zone: string };
   live: { cname: string[]; a: string[]; ns: string[] };
   steps: Step[];
-  records: { where: string; type: string; name: string; value: string }[];
+  records: Rec[];
+  zoneRecords?: { name: string; type: string; contents: Record<string, string>[] }[];
   ready: boolean;
 };
+type Rec = { where: string; type: string; name: string; value: string; purpose?: "route" | "verify" | "ssl" | "ns"; live?: "ok" | "missing" | "wrong"; note?: string };
+
+const PURPOSE_FA = { route: "اشاره به لیارا", verify: "تأیید مالکیت", ssl: "گواهی SSL", ns: "سرور نام" } as const;
+const LIVE_FA = { ok: ["دیده شد", "pill-ok"], missing: ["پیدا نشد", ""], wrong: ["مقدار دیگری دارد", "pill-warn"] } as const;
+const MODE_FA = {
+  "liara-active": "DNS این دامنه روی لیاراست؛ یارا رکوردها را خودش (با تأیید شما) می‌سازد.",
+  "liara-pending": "زون این دامنه در DNS لیارا ساخته شده ولی سرورهای نام هنوز به لیارا اشاره نمی‌کنند. فقط همین یک تغییر کار شماست؛ رکوردها را یارا می‌سازد.",
+  external: "DNS این دامنه جای دیگری است (مثلاً کلادفلر یا پنل فروشنده)؛ رکوردها را خودتان آنجا می‌سازید.",
+} as const;
 
 const STATE_ICON = { done: Check, todo: CircleDashed, waiting: Hourglass, blocked: Lock } as const;
 const STATE_FA = { done: "انجام شد", todo: "مانده", waiting: "در انتظار", blocked: "بعد از مرحله‌ی قبل" } as const;
@@ -82,6 +93,8 @@ export function DomainCard({ call }: { call: Call }) {
         <span className={`pill ${g.ready ? "pill-ok" : "pill-accent"}`}>{g.ready ? "آماده" : `${faDigits(done)} از ${faDigits(g.steps.length)}`}</span>
       </header>
 
+      {g.dns && <p className="small muted dom-mode">{MODE_FA[g.dns.mode]}</p>}
+
       <ol className="dom-steps">
         {g.steps.map((s) => {
           const Icon = STATE_ICON[s.state];
@@ -113,25 +126,37 @@ export function DomainCard({ call }: { call: Call }) {
                 <th scope="col">نوع</th>
                 <th scope="col">نام</th>
                 <th scope="col">مقدار</th>
-                <th scope="col">
-                  <span className="visually-hidden">کپی</span>
-                </th>
+                <th scope="col">الان</th>
               </tr>
             </thead>
             <tbody>
               {g.records.map((r, i) => (
-                <tr key={i}>
-                  <td className="ltr">{r.type}</td>
-                  <td className="ltr">{r.name}</td>
-                  <td className="ltr mono-cell">{r.value}</td>
+                <tr key={i} title={r.note}>
                   <td>
+                    <span className="ltr">{r.type}</span>
+                    {r.purpose && <span className="faint dom-purpose">{PURPOSE_FA[r.purpose]}</span>}
+                  </td>
+                  <td className="ltr mono-cell">
+                    {r.name}
+                    <CopyValue value={r.name} />
+                  </td>
+                  <td className="ltr mono-cell">
+                    {r.value}
                     <CopyValue value={r.value} />
                   </td>
+                  <td>{r.live ? <span className={`pill ${LIVE_FA[r.live][1]}`}>{LIVE_FA[r.live][0]}</span> : <span className="faint">–</span>}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {g.apex && !g.liara.dnsZone?.fromApi && <p className="small faint">سرورهای نام از API خوانده نشد؛ مقدار پیش‌فرض لیارا نشان داده شده است. در کنسول لیارا بخش DNS هم بررسی کنید.</p>}
+          {g.records
+            .filter((r) => r.note && r.live !== "ok")
+            .map((r) => (
+              <p key={r.name} className="small dom-note">
+                <b className="ltr">{r.name}</b>: {r.note}
+              </p>
+            ))}
+          {g.dns?.mode === "liara-pending" && !g.liara.dnsZone?.fromApi && <p className="small faint">سرورهای نام از API خوانده نشد؛ مقدار پیش‌فرض لیارا نشان داده شده است. در کنسول لیارا بخش DNS هم بررسی کنید.</p>}
           <details className="how-yara">
             <summary>قدم‌به‌قدم در {g.registrar.name}</summary>
             <ol className="small muted dom-howto">
@@ -145,7 +170,26 @@ export function DomainCard({ call }: { call: Call }) {
               </a>
             )}
           </details>
-          <p className="small faint">این مرحله بیرون از لیاراست و هیچ API‌ای برایش وجود ندارد؛ برای همین یارا نمی‌تواند خودش انجامش دهد.</p>
+          <p className="small faint">
+            {g.dns?.mode === "external"
+              ? "یارا به پنل DNS بیرون از لیارا دسترسی ندارد؛ برای همین این رکوردها کار شماست."
+              : "این مرحله بیرون از لیاراست و هیچ API‌ای برایش وجود ندارد؛ برای همین یارا نمی‌تواند خودش انجامش دهد."}
+          </p>
+        </div>
+      )}
+
+      {g.zoneRecords && g.zoneRecords.length > 0 && (
+        <div className="dom-records dom-yara">
+          <div className="small">
+            <b>یارا این رکوردها را در زون {g.dns?.zone} لیارا می‌سازد:</b>
+          </div>
+          <ul className="dom-zone-list ltr">
+            {g.zoneRecords.map((r) => (
+              <li key={`${r.type}-${r.name}`}>
+                <b>{r.type}</b> {r.name} → <span className="mono-cell">{Object.values(r.contents[0] ?? {})[0]}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -153,7 +197,8 @@ export function DomainCard({ call }: { call: Call }) {
         <span className="small faint">
           DNS همین الان:{" "}
           <span className="ltr" dir="ltr">
-            {g.apex ? (g.live.ns.length ? `NS ${g.live.ns.join(", ")}` : "NS —") : g.live.cname.length ? `CNAME ${g.live.cname[0]}` : g.live.a.length ? `A ${g.live.a.join(", ")}` : "—"}
+            {g.live.ns.length ? `NS ${g.live.ns.join(", ")}` : "NS —"}
+            {!g.apex && (g.live.cname.length ? ` · CNAME ${g.live.cname[0]}` : g.live.a.length ? ` · A ${g.live.a.join(", ")}` : "")}
           </span>
           {checkedAt && " · همین حالا بررسی شد"}
         </span>

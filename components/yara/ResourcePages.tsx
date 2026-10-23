@@ -3,7 +3,7 @@
 import { Bot, Database, FileText, Folder, FolderArchive, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { bytesFa, faDigits, relativeFa } from "@/lib/fa";
-import { MetricView } from "./Evidence";
+import { ResourceUsage } from "./Usage";
 import { useWorkbench } from "./Workbench";
 
 export function useDetail<T>(url: string) {
@@ -115,9 +115,8 @@ export function DatabasePage({ id }: { id: string }) {
             <h2>
               مصرف منابع <span className="faint small">۶ ساعت اخیر</span>
             </h2>
-            <div className="body" style={{ display: "grid", gap: 12 }}>
-              <MetricView metric="cpu" series={d.cpu} />
-              <MetricView metric="memory" series={d.memory} />
+            <div className="body">
+              <ResourceUsage cpu={d.cpu} memory={d.memory} />
             </div>
           </section>
           <section className="box">

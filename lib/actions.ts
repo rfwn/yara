@@ -168,6 +168,11 @@ export const actions = {
     input: z.object({ databaseId: z.string().min(1), on: z.boolean() }),
     run: (c, i) => c.post(`/v1/databases/${enc(i.databaseId)}/actions/scale`, { scale: i.on ? 1 : 0 }),
   }),
+  createDnsZone: action({
+    description: "Host a domain's DNS on Liara DNS (creates the zone). The zone stays PENDING until the user switches the domain's nameservers at the registrar; domainGuide shows them.",
+    input: z.object({ zone: z.string().min(3).describe("the registrable domain, e.g. example.ir") }),
+    run: (c, i) => c.dns.post("/api/v1/zones", { name: i.zone }),
+  }),
   createDnsRecord: action({
     description:
       'Create a DNS record in a Liara DNS zone. contents shapes: A/AAAA [{"ip":"1.2.3.4"}], CNAME/ALIAS [{"host":"x.liara.run"}], TXT/SPF [{"text":"..."}], MX [{"exchange":"mx.example.com","priority":10}].',
