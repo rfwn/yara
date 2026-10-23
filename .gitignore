@@ -8,3 +8,9 @@ next-env.d.ts
 data/
 .impeccable/review/
 .impeccable/questions/
+.impeccable/
+AGENTS.md
+HACKATHON.md
+DEMO.md
+*.mp4
+gituhb.txt
