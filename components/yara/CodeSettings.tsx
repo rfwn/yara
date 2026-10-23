@@ -50,7 +50,7 @@ export function CodeSettings({ hasGithub, hasRunnerToken }: { hasGithub: boolean
   }, [load]);
 
   const origin = typeof window === "undefined" ? "" : window.location.origin;
-  const runCmd = `node runner/yara-runner.mjs --server ${origin} --token ${token || "<توکن>"} --dir .`;
+  const runCmd = `npx yara-runner --server ${origin} --token ${token || "<توکن>"} --dir .`;
 
   return (
     <section className="set-section">

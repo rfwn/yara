@@ -147,7 +147,7 @@ VMs use a separate service, `iaas-api.liara.ir` (spec: `spec/Iaas.yaml` in liara
 
 ### Code access
 
-- **Local folder.** In Settings, create a runner token and run `node runner/yara-runner.mjs --server <url> --token <token> --dir .` in your project. The agents can then read, search, build and (after you approve) edit files there. Commands get a minimal environment, so your shell's secrets are not passed through.
+- **Local folder.** In Settings, create a runner token and run `npx yara-runner --server <url> --token <token> --dir .` in your project. The agents can then read, search, build and (after you approve) edit files there. Commands get a minimal environment, so your shell's secrets are not passed through.
 - **GitHub.** Add a token and a repository in Settings. Yara clones it on the server. Fixes can be pushed to a new branch and opened as a pull request, each after your approval.
 
 Reading, searching, building and testing run without asking. Code edits, deploys, git pushes and infrastructure changes always wait for your approval.

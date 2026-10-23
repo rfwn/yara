@@ -2,7 +2,7 @@
 // Yara local runner: lets Yara's agents read, build, edit and deploy a project folder on
 // this machine. Every command and file write is printed here as it happens.
 //
-//   node runner/yara-runner.mjs --server http://localhost:3001 --token yr_… [--dir .] [--name laptop] [--read-only]
+//   npx yara-runner --server http://localhost:3001 --token yr_… [--dir .] [--name laptop] [--read-only]
 //
 // Get the token from Yara → Settings → Local runner.
 import os from "node:os";

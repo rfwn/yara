@@ -1,0 +1,22 @@
+{
+  "name": "yara-runner",
+  "version": "0.1.0",
+  "description": "Local runner for Yara, the AI DevOps assistant for Liara: shares a project folder with Yara's agents",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "yara-runner": "yara-runner.mjs"
+  },
+  "files": [
+    "yara-runner.mjs",
+    "fsops.mjs",
+    "fsops.d.mts"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ignore": "7.0.13",
+    "tar": "7.5.22"
+  }
+}
