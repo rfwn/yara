@@ -1,0 +1,5 @@
+{
+  "platform": "node",
+  "app": "yara-demo-shop",
+  "port": 3000
+}

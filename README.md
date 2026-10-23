@@ -4,6 +4,11 @@ Yara is an AI DevOps assistant for apps hosted on [Liara](https://liara.ir). You
 
 Yara is an independent tool. It is not affiliated with or endorsed by Liara.
 
+**Documents:**
+- [DOCUMENTATION.md](DOCUMENTATION.md): full documentation in Persian. Covers architecture, how Yara connects to Liara's APIs, limits, and how users interact with it.
+- [DEMO.md](DEMO.md): the demo-video script, scene by scene.
+- [demo/faulty-app](demo/faulty-app): a small app with switchable faults for recording the demo.
+
 ## Features
 
 - **Accounts.** Email and password sign-up and login, with sessions in httpOnly cookies and scrypt password hashes.
