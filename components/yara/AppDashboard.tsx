@@ -2,7 +2,8 @@
 
 import { Bot, ExternalLink, RefreshCw, RotateCw, ScrollText, SquareTerminal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { relativeFa } from "@/lib/fa";
+import { faDigits, relativeFa } from "@/lib/fa";
+import { fixRequest, IncidentBanner } from "./Health";
 import { MetricView } from "./Evidence";
 import { appStatus, useWorkbench } from "./Workbench";
 
@@ -37,7 +38,7 @@ export function AppDashboard({ name }: { name: string }) {
   const [loading, setLoading] = useState(true);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [restarting, setRestarting] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{ text: string; tone: "ok" | "warn" | "busy" } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,21 +59,36 @@ export function AppDashboard({ name }: { name: string }) {
     load();
   }, [load]);
 
-  // A restart clicked here is itself the human yes; it still goes through the same validated action route.
+  // A restart clicked here is itself the human yes; it still goes through the same validated action route,
+  // and then the app is re-checked from outside so "done" means "serving again", not "request sent".
   const restart = async () => {
     setRestarting(true);
     setConfirmRestart(false);
     try {
       const res = await fetch("/api/actions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "restartApp", input: { app: name } }) });
       const data = await res.json();
-      setNotice(data.ok ? "درخواست ری‌استارت ثبت شد." : `ری‌استارت ناموفق بود: ${data.error}`);
+      if (!data.ok) {
+        setNotice({ text: `ری‌استارت انجام نشد: ${data.error ?? "خطای نامشخص"}. چیزی تغییر نکرد.`, tone: "warn" });
+        return;
+      }
+      setNotice({ text: "ری‌استارت شد؛ در حال سنجیدن پاسخ سایت…", tone: "busy" });
+      const v = await fetch("/api/monitor/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ app: name, verify: true }) })
+        .then((r) => r.json())
+        .then((x) => x.verification as { verified: boolean; probe?: { status: number | null; ms: number } | null } | undefined)
+        .catch(() => undefined);
+      if (v?.verified)
+        setNotice({ text: v.probe?.status ? `ری‌استارت شد و سایت دوباره پاسخ می‌دهد (HTTP ${faDigits(v.probe.status)}، ${faDigits(v.probe.ms)} میلی‌ثانیه).` : "ری‌استارت شد و برنامه دوباره در حال اجراست.", tone: "ok" });
+      else setNotice({ text: "ری‌استارت انجام شد ولی سایت هنوز درست پاسخ نمی‌دهد. علت را با یارا پیدا کنید.", tone: "warn" });
       wb.refreshApps();
+      wb.refreshHealth();
     } finally {
       setRestarting(false);
     }
   };
 
-  const s = d ? appStatus(d) : null;
+  const s = d ? appStatus({ ...d, name }, wb.health) : null;
+  const incidents = wb.incidents.filter((i) => i.app === name);
+  const troubled = s?.cls === "down" || s?.cls === "warn";
 
   return (
     <div className="page">
@@ -123,9 +139,9 @@ export function AppDashboard({ name }: { name: string }) {
               ری‌استارت
             </button>
           )}
-          <button type="button" className="btn btn-primary" onClick={() => wb.askYara(`وضعیت برنامه‌ی ${name} را بررسی کن: خطاهای اخیر، استقرارها و مصرف منابع.`)}>
+          <button type="button" className="btn btn-primary" onClick={() => wb.askYara(troubled ? `${name} مشکل دارد؛ علتش را پیدا کن.` : `${name} را معاینه کن؛ سالم است؟`)}>
             <Bot size={14} aria-hidden />
-            بررسی با یارا
+            {troubled ? "پیدا کردن علت با یارا" : "معاینه با یارا"}
           </button>
           <button type="button" className="icon-btn" onClick={load} aria-label="به‌روزرسانی" title="به‌روزرسانی">
             <RefreshCw size={14} className={loading ? "spin" : ""} aria-hidden />
@@ -133,9 +149,19 @@ export function AppDashboard({ name }: { name: string }) {
         </div>
       </div>
 
+      <IncidentBanner
+        incidents={incidents}
+        relative={relativeFa}
+        onFix={(i) => {
+          const r = fixRequest(i.app, i.title, i.causes, i.id);
+          wb.askYara(r.text, true, r.context);
+        }}
+      />
+
       {notice && (
-        <p className="small" role="status" style={{ color: notice.includes("ناموفق") ? "var(--danger)" : "var(--ok)" }}>
-          {notice}
+        <p className="notice small" role="status" data-tone={notice.tone}>
+          {notice.tone === "busy" && <RotateCw size={13} className="spin" aria-hidden />}
+          {notice.text}
         </p>
       )}
 

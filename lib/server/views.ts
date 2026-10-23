@@ -1,4 +1,5 @@
 import "server-only";
+import { listVMs, resolveVM, vmDetails, vmOperations, vmTraffic } from "../vms";
 import { enc, maskEnvs, nowSec, summarizeSeries, withKeyVariants, type LiaraClient, type LogLine, type Project, type Reports } from "../liara";
 
 const settle = async <T,>(p: Promise<T>): Promise<T | null> => {
@@ -85,7 +86,7 @@ export async function recentLogs(c: LiaraClient, name: string, seconds: number) 
 
 /** Databases and buckets for the explorer tree. */
 export async function resources(c: LiaraClient) {
-  const [dbs, buckets] = await Promise.all([settle(c.get<any>("/v1/databases")), settle(c.storage.get<any>("/api/v1/buckets"))]);
+  const [dbs, buckets, vms] = await Promise.all([settle(c.get<any>("/v1/databases")), settle(c.storage.get<any>("/api/v1/buckets")), settle(listVMs(c))]);
   return {
     databases: ((dbs?.databases ?? dbs) || []).map((d: any) => ({
       id: d._id as string,
@@ -95,7 +96,8 @@ export async function resources(c: LiaraClient) {
       on: d.scale === undefined ? true : d.scale > 0,
     })),
     buckets: ((buckets?.buckets ?? []) as any[]).map((b) => ({ name: b.name as string, permission: b.permission as string, status: (b.status ?? "") as string })),
-    errors: { databases: dbs === null, buckets: buckets === null },
+    vms: (vms ?? []).map((v) => ({ id: v._id, name: v.name, power: v.power, state: v.state, os: v.OS })),
+    errors: { databases: dbs === null, buckets: buckets === null, vms: vms === null },
   };
 }
 
@@ -146,4 +148,16 @@ export async function bucketDetail(c: LiaraClient, name: string) {
     objects: (o.Contents ?? []).map((x: any) => ({ key: x.Key as string, size: x.Size as number, modified: x.LastModified as string })),
     listingError: objects === null,
   };
+}
+
+/** Everything the VM page shows, in one request. Credentials are never included. */
+export async function vmDetail(c: LiaraClient, ref: string) {
+  const vm = await resolveVM(c, ref);
+  const [details, operations, disks, traffic] = await Promise.all([
+    vmDetails(c, vm._id),
+    settle(vmOperations(c, vm._id)),
+    settle(c.iaas.get<{ availableSize?: number; disks?: { _id: string; name: string; size: number; createdAt: string }[] }>(`/vm/disk/${enc(vm._id)}`)),
+    settle(vmTraffic(c, vm._id)),
+  ]);
+  return { ...details, operations: (operations ?? []).slice(0, 15), disks, traffic };
 }

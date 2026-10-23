@@ -4,6 +4,7 @@ import { Bot, RefreshCw, ScrollText, SquareTerminal, Upload } from "lucide-react
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { bytesFa, faDigits, relativeFa } from "@/lib/fa";
+import { fixRequest, IncidentBanner } from "./Health";
 import { appStatus, useWorkbench } from "./Workbench";
 
 type Row = {
@@ -65,14 +66,15 @@ export function Overview() {
 
   const counts = (rows ?? []).reduce(
     (acc, r) => {
-      const s = appStatus(r).cls;
+      const s = appStatus(r, wb.health).cls;
       if (s === "up") acc.up++;
       else if (s === "down") acc.down++;
+      else if (s === "warn") acc.warn++;
       else if (!r.on) acc.off++;
       if (r.release?.state === "FAILED") acc.failed++;
       return acc;
     },
-    { up: 0, down: 0, off: 0, failed: 0 },
+    { up: 0, down: 0, warn: 0, off: 0, failed: 0 },
   );
 
   return (
@@ -80,7 +82,7 @@ export function Overview() {
       <div className="page-head">
         <div>
           <h1>نمای کلی</h1>
-          <p className="sub">وضعیت زنده‌ی برنامه‌های حساب لیارای شما · مصرف ۳ ساعت اخیر</p>
+          <p className="sub">سلامت برنامه‌های حساب لیارای شما، همان‌طور که بازدیدکننده می‌بیند · مصرف ۳ ساعت اخیر</p>
         </div>
         <div className="toolbar">
           <button type="button" className="btn" onClick={load} disabled={loading}>
@@ -91,7 +93,7 @@ export function Overview() {
             <Upload size={14} aria-hidden />
             استقرار کد
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => wb.askYara("وضعیت همه‌ی برنامه‌هایم را بررسی کن و هر مشکلی دیدی با شواهد بگو.")}>
+          <button type="button" className="btn btn-primary" onClick={() => wb.askYara("همه‌ی برنامه‌هایم را بررسی کن؛ اگر مشکلی هست با شواهد بگو.")}>
             <Bot size={14} aria-hidden />
             بررسی همه با یارا
           </button>
@@ -102,11 +104,17 @@ export function Overview() {
         <p className="summary-line" role="status">
           <span>
             <span className="dot up" />
-            {faDigits(counts.up)} در حال اجرا
+            {faDigits(counts.up)} سالم
           </span>
+          {counts.warn > 0 && (
+            <span>
+              <span className="dot warn" />
+              {faDigits(counts.warn)} مشکل‌دار
+            </span>
+          )}
           <span className={counts.down ? "bad" : undefined}>
             <span className="dot down" />
-            {faDigits(counts.down)} دچار خطا
+            {faDigits(counts.down)} از دسترس خارج
           </span>
           <span>
             <span className="dot" />
@@ -115,6 +123,15 @@ export function Overview() {
           {counts.failed > 0 && <span className="bad">{faDigits(counts.failed)} استقرار ناموفق اخیر</span>}
         </p>
       )}
+
+      <IncidentBanner
+        incidents={wb.incidents}
+        relative={relativeFa}
+        onFix={(i) => {
+          const r = fixRequest(i.app, i.title, i.causes, i.id);
+          wb.askYara(r.text, true, r.context);
+        }}
+      />
 
       {error ? (
         <div className="alert" role="alert">
@@ -133,7 +150,9 @@ export function Overview() {
                 <th scope="col" className="hide-sm">
                   پلتفرم و پلن
                 </th>
-                <th scope="col">پردازنده</th>
+                <th scope="col">
+                  پردازنده <span className="faint">(هسته)</span>
+                </th>
                 <th scope="col">حافظه</th>
                 <th scope="col" className="hide-sm">
                   آخرین استقرار
@@ -155,7 +174,7 @@ export function Overview() {
                     </tr>
                   ))
                 : rows.map((r) => {
-                    const s = appStatus(r);
+                    const s = appStatus(r, wb.health);
                     const rel = r.release ? (RELEASE_LABEL[r.release.state] ?? [r.release.state, ""]) : null;
                     const memMax = Math.max(r.memory?.max ?? 0, r.memory?.last ?? 0, 512 * 1024 * 1024);
                     return (
@@ -199,9 +218,9 @@ export function Overview() {
                             <button
                               type="button"
                               className="icon-btn"
-                              onClick={() => wb.askYara(`وضعیت برنامه‌ی ${r.name} را بررسی کن: خطاهای اخیر، استقرارها و مصرف منابع.`)}
-                              aria-label={`بررسی ${r.name} با یارا`}
-                              title="بررسی با یارا"
+                              onClick={() => wb.askYara(`${r.name} را معاینه کن؛ سالم است؟`)}
+                              aria-label={`معاینه‌ی ${r.name} با یارا`}
+                              title="معاینه با یارا"
                             >
                               <Bot size={15} aria-hidden />
                             </button>

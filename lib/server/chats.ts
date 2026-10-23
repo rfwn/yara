@@ -19,13 +19,15 @@ function pendingIn(raw: string) {
 
 export function listChats(userId: string, limit = 100): ChatSummary[] {
   return (
-    db().prepare("SELECT id, title, messages, updated_at FROM chats WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?").all(userId, limit) as {
+    db().prepare("SELECT id, title, messages, updated_at, engine, pending FROM chats WHERE user_id = ? AND engine = 'graph' ORDER BY updated_at DESC LIMIT ?").all(userId, limit) as {
       id: string;
       title: string;
       messages: string;
       updated_at: number;
+      engine: string;
+      pending: number;
     }[]
-  ).map((r) => ({ id: r.id, title: r.title, updatedAt: r.updated_at, pending: pendingIn(r.messages) }));
+  ).map((r) => ({ id: r.id, title: r.title, updatedAt: r.updated_at, pending: r.engine === "graph" ? r.pending : pendingIn(r.messages) }));
 }
 
 export function getChat(userId: string, id: string): { id: string; title: string; messages: UIMessage[]; createdAt: number } | null {
@@ -79,4 +81,17 @@ export function takeChatQuota(userId: string) {
     return true;
   }
   return ++u.n <= LIMIT;
+}
+
+/** Records an agent-graph conversation (messages live in the LangGraph checkpointer). */
+export function touchGraphChat(userId: string, id: string, firstMessage: string, pending: number) {
+  const now = Date.now();
+  const clean = firstMessage.replace(/[`*_#>\[\]]/g, "").replace(/\s+/g, " ").trim();
+  const title = clean.length > 70 ? `${clean.slice(0, 68)}…` : clean || "گفت‌وگوی تازه";
+  db()
+    .prepare(
+      `INSERT INTO chats (id, user_id, title, messages, created_at, updated_at, engine, pending) VALUES (?, ?, ?, '[]', ?, ?, 'graph', ?)
+       ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, pending = excluded.pending WHERE chats.user_id = excluded.user_id`,
+    )
+    .run(id, userId, title, now, now, pending);
 }

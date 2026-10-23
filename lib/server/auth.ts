@@ -15,6 +15,8 @@ export type User = {
   teamID: string | null;
   model: string | null;
   hasToken: boolean;
+  hasGithub: boolean;
+  hasRunnerToken: boolean;
   createdAt: number;
 };
 
@@ -24,6 +26,8 @@ type UserRow = {
   name: string;
   password_hash: string;
   liara_token_enc: string | null;
+  github_token_enc: string | null;
+  runner_token_hash: string | null;
   team_id: string | null;
   model: string | null;
   created_at: number;
@@ -36,6 +40,8 @@ const toUser = (r: UserRow): User => ({
   teamID: r.team_id,
   model: r.model,
   hasToken: !!r.liara_token_enc,
+  hasGithub: !!r.github_token_enc,
+  hasRunnerToken: !!r.runner_token_hash,
   createdAt: r.created_at,
 });
 
@@ -134,16 +140,31 @@ export async function requireUser(opts: { needToken?: boolean } = {}): Promise<U
 }
 
 /** For API routes: the user plus decrypted Liara credentials, or a 401 Response. */
-export async function apiUser(): Promise<{ user: User; creds: LiaraCreds } | Response> {
+export async function apiUser(): Promise<{ user: User; creds: LiaraCreds; github: string | null } | Response> {
   const row = userRowFromToken((await cookies()).get(COOKIE)?.value);
   if (!row) return Response.json({ error: "ابتدا وارد حساب خود شوید." }, { status: 401 });
   const token = row.liara_token_enc ? decrypt(row.liara_token_enc) : null;
-  return { user: toUser(row), creds: { token: token ?? "", teamID: row.team_id ?? undefined } };
+  const github = row.github_token_enc ? decrypt(row.github_token_enc) : null;
+  return { user: toUser(row), creds: { token: token ?? "", teamID: row.team_id ?? undefined }, github };
 }
 
-export function updateUserSettings(userId: string, s: { liaraToken?: string | null; teamID?: string | null; model?: string | null; name?: string }) {
+/** Rotates the local-runner pairing token; returns the plain token once. Only its hash is stored. */
+export function rotateRunnerToken(userId: string) {
+  const token = `yr_${randomToken(24)}`;
+  db().prepare("UPDATE users SET runner_token_hash = ? WHERE id = ?").run(sha256(token), userId);
+  return token;
+}
+
+export function updateUserSettings(
+  userId: string,
+  s: { liaraToken?: string | null; githubToken?: string | null; teamID?: string | null; model?: string | null; name?: string },
+) {
   const sets: string[] = [];
   const vals: unknown[] = [];
+  if (s.githubToken !== undefined) {
+    sets.push("github_token_enc = ?");
+    vals.push(s.githubToken ? encrypt(s.githubToken) : null);
+  }
   if (s.liaraToken !== undefined) {
     sets.push("liara_token_enc = ?");
     vals.push(s.liaraToken ? encrypt(s.liaraToken) : null);

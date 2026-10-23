@@ -57,6 +57,9 @@ export function verifyPassword(password: string, stored: string): boolean {
   return crypto.timingSafeEqual(expected, actual);
 }
 
-export const randomToken = (bytes = 32) => crypto.randomBytes(bytes).toString("base64url");
+/** A stable secret for in-process calls (server.mjs → route handlers). Same derivation as internalKey() in server.mjs. */
+export const internalKey = (purpose: string) => crypto.createHmac("sha256", key()).update(purpose).digest("hex");
+
+export const randomToken =(bytes = 32) => crypto.randomBytes(bytes).toString("base64url");
 export const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 export const newId = () => crypto.randomUUID();

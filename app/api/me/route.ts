@@ -12,7 +12,7 @@ export async function GET() {
 export async function PATCH(req: Request) {
   const auth = await apiUser();
   if (auth instanceof Response) return auth;
-  const body = (await req.json()) as { liaraToken?: string; teamID?: string; model?: string; name?: string };
+  const body = (await req.json()) as { liaraToken?: string; githubToken?: string; teamID?: string; model?: string; name?: string };
 
   const update: Parameters<typeof updateUserSettings>[1] = {};
   if (typeof body.name === "string" && body.name.trim().length >= 2) update.name = body.name.trim().slice(0, 60);
@@ -35,6 +35,15 @@ export async function PATCH(req: Request) {
       return Response.json({ error }, { status: 400 });
     }
     update.liaraToken = token;
+  }
+
+  if (typeof body.githubToken === "string") {
+    const gh = body.githubToken.trim();
+    if (gh) {
+      const res = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${gh}`, "User-Agent": "yara" } });
+      if (!res.ok) return Response.json({ error: "گیت‌هاب این توکن را نپذیرفت. توکن و دسترسی‌های آن (Contents و Pull requests) را بررسی کنید." }, { status: 400 });
+    }
+    update.githubToken = gh || null;
   }
 
   updateUserSettings(auth.user.id, update);

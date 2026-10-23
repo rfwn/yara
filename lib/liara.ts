@@ -6,6 +6,8 @@
 const API_BASE = process.env.LIARA_API_BASE || "https://api.liara.ir";
 const DNS_BASE = "https://dns-service.liara.ir";
 const STORAGE_BASE = "https://storage-service.liara.ir";
+// Virtual machines live on a separate service (same token). Not in the main OpenAPI spec; see liara-cloud/openapi spec/Iaas.yaml.
+const IAAS_BASE = process.env.LIARA_IAAS_BASE || "https://iaas-api.liara.ir";
 
 export type LiaraCreds = { token: string; teamID?: string };
 
@@ -69,6 +71,12 @@ export function createLiaraClient(creds: LiaraCreds) {
       post: <T = unknown>(path: string, body?: unknown) => request<T>("POST", path, { base: DNS_BASE, body }),
       put: <T = unknown>(path: string, body?: unknown) => request<T>("PUT", path, { base: DNS_BASE, body }),
       delete: <T = unknown>(path: string) => request<T>("DELETE", path, { base: DNS_BASE }),
+    },
+    iaas: {
+      get: <T = unknown>(path: string, query?: Query) => request<T>("GET", path, { base: IAAS_BASE, query }),
+      post: <T = unknown>(path: string, body?: unknown) => request<T>("POST", path, { base: IAAS_BASE, body }),
+      patch: <T = unknown>(path: string, body?: unknown) => request<T>("PATCH", path, { base: IAAS_BASE, body }),
+      delete: <T = unknown>(path: string) => request<T>("DELETE", path, { base: IAAS_BASE }),
     },
     storage: {
       get: <T = unknown>(path: string, query?: Query) => request<T>("GET", path, { base: STORAGE_BASE, query }),

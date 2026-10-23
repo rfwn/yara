@@ -5,12 +5,14 @@ import { useState } from "react";
 import { relativeFa } from "@/lib/fa";
 import { LogoMark } from "./Logo";
 import type { Ask, CaseSummary } from "./Workbench";
-import { YaraPane } from "./YaraPane";
+import { AgentPane } from "./agent/AgentPane";
+import type { AgentEvent } from "./agent/timeline";
 
 /** Yara lives in its own full-height sidebar, with its conversation history inside it. */
 export function ChatSidebar({
   chatId,
-  initialMessages,
+  initialEvents,
+  app,
   ask,
   onAskConsumed,
   cases,
@@ -22,7 +24,8 @@ export function ChatSidebar({
   resizing,
 }: {
   chatId: string;
-  initialMessages: unknown[] | null;
+  initialEvents: AgentEvent[] | null;
+  app?: string;
   ask: Ask | null;
   onAskConsumed: () => void;
   cases: CaseSummary[];
@@ -118,7 +121,7 @@ export function ChatSidebar({
           )}
         </div>
       ) : (
-        chatId && <YaraPane key={chatId} chatId={chatId} initialMessages={(initialMessages as never) ?? []} ask={ask} onAskConsumed={onAskConsumed} />
+        chatId && <AgentPane key={chatId} chatId={chatId} initialEvents={initialEvents ?? []} app={app} ask={ask} onAskConsumed={onAskConsumed} />
       )}
     </aside>
   );

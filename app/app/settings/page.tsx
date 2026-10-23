@@ -1,4 +1,6 @@
+import { CodeSettings } from "@/components/yara/CodeSettings";
 import { SettingsForm } from "@/components/yara/Forms";
+import { GovernanceSettings } from "@/components/yara/GovernanceSettings";
 import { DEFAULT_MODEL, MODELS } from "@/lib/models";
 import { requireUser } from "@/lib/server/auth";
 
@@ -14,6 +16,8 @@ export default async function SettingsPage() {
         models={MODELS}
         defaultModel={DEFAULT_MODEL}
       />
+      <GovernanceSettings />
+      <CodeSettings hasGithub={user.hasGithub} hasRunnerToken={user.hasRunnerToken} />
     </div>
   );
 }

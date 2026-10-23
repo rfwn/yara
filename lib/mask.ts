@@ -14,6 +14,22 @@ export const stripAnsi = (s: string) => s.replace(ANSI, "");
 
 export const stripYaraMarkers = (s: string) => s.replace(MARKER, "");
 
+const PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
+const ANY_ASSIGNMENT = /^(\s*(?:\d+\t)?(?:export\s+)?[A-Za-z_][\w.]*\s*=\s*)(.+)$/gm;
+
+/** A shell command that reads a secret file (its output then gets the same masking as the file). */
+export const touchesSecretFile = (command: string) => /(^|[\s/])(\.env\b|\.npmrc|\.netrc|id_rsa|id_ed25519|[\w-]+\.(pem|key)\b)/i.test(command);
+
+/** Files whose every value is a secret: env files, keys, credential stores. */
+export const isSecretFile = (path: string) => /(^|[\\/])(\.env(\.[\w.-]+)?|\.npmrc|\.pypirc|\.netrc|id_(rsa|ed25519|ecdsa)|credentials(\.json)?|[^\\/]+\.(pem|key|p12|pfx))$/i.test(path) && !/\.(example|sample|template)$/i.test(path);
+
+/** Masks secrets in text that is about to reach the model (file contents, command output). */
+export function maskSecrets(text: string, opts: { secretFile?: boolean } = {}) {
+  let t = text.replace(PRIVATE_KEY, "-----PRIVATE KEY (hidden by Yara)-----");
+  if (opts.secretFile) t = t.replace(ANY_ASSIGNMENT, (_m, k: string) => `${k}•••• (hidden)`);
+  return t.replace(SECRET_LINE, "$1=•••• (hidden)").replace(SECRET_INLINE, (m, key: string, value: string) => (value.startsWith("••••") ? m : `${key}=••••`));
+}
+
 /** Strip terminal codes and Yara's markers, mask secret-looking assignments, keep the last `max` characters. */
 export function cleanShellOutput(raw: string, max = 8000) {
   const clean = stripYaraMarkers(stripAnsi(raw))

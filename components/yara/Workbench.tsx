@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Activity,
   Bot,
   Boxes,
   ChevronsDownUp,
@@ -14,7 +15,9 @@ import {
   RefreshCw,
   ScrollText,
   Search,
+  Server,
   Settings,
+  ShieldCheck,
   SquareTerminal,
   Upload,
   Wifi,
@@ -25,6 +28,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { faDigits } from "@/lib/fa";
+import { HEALTH, type Cause, type HealthStatus } from "./Health";
 import { ChatSidebar } from "./ChatSidebar";
 import { CommandPalette } from "./CommandPalette";
 import { ConsolePane, type ConsoleController, type ConsoleRunResult } from "./ConsolePane";
@@ -37,14 +41,21 @@ export type AppSummary = { name: string; platform: string; status: string; on: b
 export type CaseSummary = { id: string; title: string; updatedAt: number; pending?: number };
 type DbSummary = { id: string; name: string; type: string; status: string; on: boolean };
 type BucketSummary = { name: string; permission: string; status: string };
+type VMSummary = { id: string; name: string; power: string; state: string; os: string };
 type PanelTab = "console" | "logs";
-export type Ask = { text: string; send: boolean; nonce: number };
+export type Ask = { text: string; send: boolean; nonce: number; context?: string };
+export type OpenIncident = { id: string; app: string; title: string; severity: "critical" | "warning"; causes: Cause[]; openedAt: number; escalated: boolean };
 
 type Ctx = {
   apps: AppSummary[];
   refreshApps: () => void;
   openApp: (name: string) => void;
-  askYara: (text: string, send?: boolean) => void;
+  /** Opens a new Yara chat with `text`; `context` travels with it to the agents but is never shown as the user's words. */
+  askYara: (text: string, send?: boolean, context?: string) => void;
+  /** Open incidents and last known health per watched app, from the background monitor. */
+  incidents: OpenIncident[];
+  health: Record<string, HealthStatus>;
+  refreshHealth: () => void;
   openConsole: (app: string) => void;
   openLogs: (app: string) => void;
   openPalette: () => void;
@@ -62,8 +73,11 @@ export const useWorkbench = () => {
   return c;
 };
 
-export function appStatus(a: { on: boolean; status: string }) {
+/** Status of an app: the monitor's live health when it watches the app, else the platform's container status. */
+export function appStatus(a: { on: boolean; status: string; name?: string }, health?: Record<string, HealthStatus>) {
   if (!a.on) return { cls: "", label: "خاموش" };
+  const h = a.name ? health?.[a.name] : undefined;
+  if (h && h !== "unknown" && h !== "off") return { cls: HEALTH[h].dot, label: HEALTH[h].label };
   if (/run|active|ok|healthy/i.test(a.status)) return { cls: "up", label: "در حال اجرا" };
   if (/fail|error|crash|stopped/i.test(a.status)) return { cls: "down", label: "دچار خطا" };
   return { cls: "warn", label: a.status };
@@ -88,19 +102,20 @@ function writePref(key: string, v: unknown) {
   }
 }
 
-type Tab = { href: string; label: string; icon: "app" | "db" | "bucket"; dot?: string };
+type Tab = { href: string; label: string; icon: "app" | "db" | "bucket" | "vm"; dot?: string };
 
 /** Which resource the current route shows, as an editor tab. */
-function tabFor(pathname: string, apps: AppSummary[], dbs: DbSummary[]): Tab | null {
+function tabFor(pathname: string, apps: AppSummary[], dbs: DbSummary[], health: Record<string, HealthStatus>): Tab | null {
   const [, , kind, raw] = pathname.split("/");
   if (!raw) return null;
   const id = decodeURIComponent(raw);
   if (kind === "apps") {
     const a = apps.find((x) => x.name === id);
-    return { href: pathname, label: id, icon: "app", dot: a ? appStatus(a).cls : "" };
+    return { href: pathname, label: id, icon: "app", dot: a ? appStatus(a, health).cls : "" };
   }
   if (kind === "databases") return { href: pathname, label: dbs.find((d) => d.id === id)?.name ?? id, icon: "db" };
   if (kind === "buckets") return { href: pathname, label: id, icon: "bucket" };
+  if (kind === "vms") return { href: pathname, label: id, icon: "vm" };
   return null;
 }
 
@@ -124,8 +139,30 @@ export function Workbench({
   const [appsLoading, setAppsLoading] = useState(true);
   const [dbs, setDbs] = useState<DbSummary[]>([]);
   const [buckets, setBuckets] = useState<BucketSummary[]>([]);
-  const [resErr, setResErr] = useState({ databases: false, buckets: false });
+  const [vms, setVms] = useState<VMSummary[]>([]);
+  const [resErr, setResErr] = useState({ databases: false, buckets: false, vms: false });
   const [cases, setCases] = useState(initialCases);
+  const [openIncidents, setOpenIncidents] = useState(0);
+  const [incidents, setIncidents] = useState<OpenIncident[]>([]);
+  const [health, setHealth] = useState<Record<string, HealthStatus>>({});
+
+  // Open incidents and live health from the background monitor: the badge, banners and status dots.
+  const refreshHealth = useCallback(() => {
+    fetch("/api/monitor?summary=1")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setOpenIncidents(d.open ?? 0);
+        setIncidents(d.incidents ?? []);
+        setHealth(d.health ?? {});
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    refreshHealth();
+    const t = setInterval(refreshHealth, 30_000);
+    return () => clearInterval(t);
+  }, [pathname, refreshHealth]);
 
   const [sideOpen, setSideOpen] = useState(true);
   const [chatOpen, setChatOpen] = useState(true);
@@ -163,6 +200,7 @@ export function Workbench({
         const r = await rres.json();
         setDbs(r.databases);
         setBuckets(r.buckets);
+        setVms(r.vms ?? []);
         setResErr(r.errors);
       }
     } catch (e) {
@@ -183,9 +221,9 @@ export function Workbench({
 
   const loadChat = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/chats/${id}`);
+      const res = await fetch(`/api/agent/${id}`);
       if (!res.ok) throw new Error();
-      setChatMessages((await res.json()).messages);
+      setChatMessages((await res.json()).events);
       setChatId(id);
     } catch {
       setChatMessages(null);
@@ -231,20 +269,20 @@ export function Workbench({
 
   // Editor tabs follow the resources you open.
   useEffect(() => {
-    const t = tabFor(pathname, apps, dbs);
+    const t = tabFor(pathname, apps, dbs, health);
     if (t) setTabs((ts) => (ts.some((x) => x.href === t.href) ? ts.map((x) => (x.href === t.href ? t : x)) : [...ts, t]));
     if (currentApp) setTarget(currentApp);
-  }, [pathname, apps, dbs, currentApp]);
+  }, [pathname, apps, dbs, health, currentApp]);
 
   useEffect(() => {
     if (!target && apps[0]) setTarget(apps[0].name);
   }, [apps, target]);
 
   // ---- actions exposed to editor pages ----
-  const askYara = useCallback((text: string, send = true) => {
+  const askYara = useCallback((text: string, send = true, context?: string) => {
     setChatMessages(null);
     setChatId(newChatId());
-    setAsk({ text, send, nonce: Date.now() });
+    setAsk({ text, send, nonce: Date.now(), context });
     setChatOpen(true);
   }, []);
 
@@ -361,7 +399,7 @@ export function Workbench({
     router.refresh();
   };
 
-  const down = apps.filter((a) => appStatus(a).cls === "down").length;
+  const down = apps.filter((a) => appStatus(a, health).cls === "down").length;
   const elsewhere = cases.filter((c) => c.id !== chatId && (c.pending ?? 0) > 0);
   const totalPending = pending + elsewhere.reduce((n, c) => n + (c.pending ?? 0), 0);
   const showPending = () => {
@@ -377,6 +415,9 @@ export function Workbench({
       refreshApps,
       openApp,
       askYara,
+      incidents,
+      health,
+      refreshHealth,
       openConsole,
       openLogs,
       openPalette: () => setPaletteOpen(true),
@@ -386,11 +427,11 @@ export function Workbench({
       registerConsole,
       runInConsole,
     }),
-    [apps, refreshApps, openApp, askYara, openConsole, openLogs, openDeploy, refreshCases, registerConsole, runInConsole],
+    [apps, refreshApps, openApp, askYara, incidents, health, refreshHealth, openConsole, openLogs, openDeploy, refreshCases, registerConsole, runInConsole],
   );
 
   const TabIcon = ({ t }: { t: Tab }) =>
-    t.icon === "app" ? <span className={`dot ${t.dot ?? ""}`} /> : t.icon === "db" ? <Database size={13} aria-hidden /> : <FolderArchive size={13} aria-hidden />;
+    t.icon === "app" ? <span className={`dot ${t.dot ?? ""}`} /> : t.icon === "db" ? <Database size={13} aria-hidden /> : t.icon === "vm" ? <Server size={13} aria-hidden /> : <FolderArchive size={13} aria-hidden />;
 
   return (
     <WorkbenchCtx.Provider value={ctx}>
@@ -417,6 +458,19 @@ export function Workbench({
           <button type="button" className="act-btn" onClick={() => setDeployOpen(true)} title="استقرار کد" aria-label="استقرار کد">
             <Upload size={20} aria-hidden />
           </button>
+          <Link
+            href="/app/monitoring"
+            className="act-btn"
+            aria-current={pathname === "/app/monitoring" ? "page" : undefined}
+            title={openIncidents ? `پایش و سلامت (${faDigits(openIncidents)} حادثه‌ی باز)` : "پایش و سلامت"}
+            aria-label="پایش و سلامت"
+          >
+            <Activity size={20} aria-hidden />
+            {openIncidents > 0 && <span className="act-badge act-badge-danger">{faDigits(openIncidents)}</span>}
+          </Link>
+          <Link href="/app/audit" className="act-btn" aria-current={pathname === "/app/audit" ? "page" : undefined} title="سوابق تغییرات" aria-label="سوابق تغییرات">
+            <ShieldCheck size={20} aria-hidden />
+          </Link>
           <span className="spacer" />
           <button type="button" className="act-btn" onClick={() => setPaletteOpen(true)} title={`فرمان‌ها (${mod}+K)`} aria-label="فرمان‌ها">
             <Search size={20} aria-hidden />
@@ -449,7 +503,7 @@ export function Workbench({
               ) : (
                 <ul className="ex-list">
                   {apps.map((a) => {
-                    const s = appStatus(a);
+                    const s = appStatus(a, health);
                     return (
                       <li key={a.name}>
                         <Link href={`/app/apps/${encodeURIComponent(a.name)}`} className="ex-item" aria-current={currentApp === a.name ? "page" : undefined} title={`${a.name} · ${s.label}`}>
@@ -486,7 +540,40 @@ export function Workbench({
                     </li>
                   );
                 })}
-                {!appsLoading && dbs.length === 0 && <p className="ex-note">{resErr.databases ? <span className="error-text">فهرست دیتابیس‌ها دریافت نشد.</span> : "دیتابیسی نیست."}</p>}
+                {!appsLoading && dbs.length === 0 && <p className="ex-note">{resErr.databases ? <span className="ex-unavail">
+                        در دسترس نیست · 
+                        <button type="button" className="link" onClick={refreshApps}>
+                          دوباره
+                        </button>
+                      </span> : "دیتابیسی نیست."}</p>}
+              </ul>
+            </details>
+            <details className="ex-group" open>
+              <summary>
+                ماشین‌های مجازی <span className="count num">{resErr.vms || appsError ? "–" : faDigits(vms.length)}</span>
+              </summary>
+              <ul className="ex-list">
+                {vms.map((v) => {
+                  const href = `/app/vms/${encodeURIComponent(v.name)}`;
+                  const on = v.power === "POWERED_ON";
+                  return (
+                    <li key={v.id}>
+                      <Link href={href} className="ex-item" aria-current={pathname === href ? "page" : undefined}>
+                        <span className={`dot ${on ? "up" : v.power === "SUSPENDED" || v.state === "FROZEN" ? "down" : ""}`} role="img" aria-label={on ? "روشن" : "خاموش"} />
+                        <span className="grow ltr" style={{ textAlign: "right" }}>
+                          {v.name}
+                        </span>
+                        <span className="trail ltr">{v.os}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+                {!appsLoading && vms.length === 0 && <p className="ex-note">{resErr.vms ? <span className="ex-unavail">
+                        در دسترس نیست · 
+                        <button type="button" className="link" onClick={refreshApps}>
+                          دوباره
+                        </button>
+                      </span> : "ماشین مجازی‌ای نیست."}</p>}
               </ul>
             </details>
             <details className="ex-group" open>
@@ -508,7 +595,12 @@ export function Workbench({
                     </li>
                   );
                 })}
-                {!appsLoading && buckets.length === 0 && <p className="ex-note">{resErr.buckets ? <span className="error-text">فهرست باکت‌ها دریافت نشد.</span> : "باکتی نیست."}</p>}
+                {!appsLoading && buckets.length === 0 && <p className="ex-note">{resErr.buckets ? <span className="ex-unavail">
+                        در دسترس نیست · 
+                        <button type="button" className="link" onClick={refreshApps}>
+                          دوباره
+                        </button>
+                      </span> : "باکتی نیست."}</p>}
               </ul>
             </details>
           </div>
@@ -595,7 +687,8 @@ export function Workbench({
         {/* Yara: the AI chat sidebar */}
         <ChatSidebar
           chatId={chatId}
-          initialMessages={chatMessages}
+          initialEvents={chatMessages as never}
+          app={currentApp}
           ask={ask}
           onAskConsumed={() => setAsk(null)}
           cases={cases}

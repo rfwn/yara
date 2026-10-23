@@ -33,7 +33,7 @@ colors:
   light-seam: "#e5e5e5"
   light-text: "#1f1f1f"
   light-text-2: "#555a62"
-  light-text-3: "#6b7078"
+  light-text-3: "#646971"
 typography:
   display:
     fontFamily: "YekanBakh, Vazirmatn, Tahoma, system-ui, sans-serif"
@@ -62,6 +62,11 @@ typography:
     fontSize: "14.5px"
     fontWeight: 400
     lineHeight: 1.85
+  control:
+    fontFamily: "YekanBakh, Vazirmatn, Tahoma, system-ui, sans-serif"
+    fontSize: "13px"
+    fontWeight: 400
+    lineHeight: 1.6
   label:
     fontFamily: "YekanBakh, Vazirmatn, Tahoma, system-ui, sans-serif"
     fontSize: "11.5px"
@@ -234,7 +239,8 @@ A graphite neutral ramp carrying one blue accent and three status hues, each sta
 - **Display** (800, clamp(2.6rem, 6.2vw, 5.2rem), 1.15, -0.025em, max 18ch): landing hero only.
 - **Headline** (800, clamp(1.7rem, 3.2vw, 2.6rem), 1.2, -0.02em): landing section heads; the closing line runs to clamp(1.9rem, 4vw, 3.2rem).
 - **Title** (750, 20px): page heads in the editor; 22px for auth and settings pages; 22px/750 tabular for headline stats.
-- **Body** (400, 14px, 1.7): the base for every app surface. Controls run 13–13.5px, weight 600 on buttons.
+- **Body** (400, 14px, 1.7): the base for every app surface.
+- **Control** (13px): tables, steps, suggestions, cause lists and other dense UI; buttons run 13.5px at weight 600.
 - **Prose** (400, 14.5px, 1.85): Yara's markdown replies (14px inside the sidebar), inner headings 15px/700.
 - **Label** (700, 11.5–12.5px): explorer headers and groups, table column heads, panel tabs, box headers, chat title. Never uppercase, never letter-spaced (Persian has no case).
 - **Mono** (12px, 1.6): logs, JSON, code blocks (12.5px), resource targets, kbd keys (11px).
@@ -303,14 +309,23 @@ Compact, quiet, and confident.
 - **Status bar:** 24px, 12px text-2 cells with 3px radius; the pending-approvals cell turns solid accent.
 - **Command palette:** 620px floating layer at 14vh, 50px input, 38px rows, active row on the active veil, kbd legend footer.
 
+### Logo
+The designer's mark (`public/yara-logo.svg`): a bold geometric glyph that reads as both «ی» and a smile. In the product it is drawn in white on the accent tile (`LogoMark`, 6px radius, hairline lift) at 14–44px; the favicon is the same glyph on a 14px-radius accent square. Never recolor the glyph to a status color or place it without the tile inside the workbench.
+
 ### Approval Card (signature)
-The product's spine. 8px card on sidebar graphite. While pending it carries an accent-line border and a 4px accent-soft ring; resolved, it falls back to a plain seam. The header row states the decision state with a shield icon and a risk pill (low/medium/high as ok/warn/danger). Body: 15px/700 action title with a mono target chip, a markdown summary, collapsible raw JSON. High-risk actions require typing the resource name into an LTR confirm field. The raised footer holds the reassurance note with a Ctrl/⌘+↵ kbd hint and Deny (ghost) / Approve (primary, or danger when high risk). In the Yara sidebar and under 560px the footer stacks and the buttons share the width. Approval success draws its check stroke in 380ms.
+The product's spine. 8px card on sidebar graphite. While pending it carries an accent-line border and a 4px accent-soft ring; resolved, it falls back to a plain seam. The header row states the decision state with a shield icon and a risk pill (low/medium/high as ok/warn/danger). Body: 15px/700 action title with a mono target chip, a markdown summary, an explanation block on the background step (96px Persian labels: «چرا», the agent's one-line reason tied to the finding; «بعد از اجرا», the automatic health re-check; «برگشت‌پذیر», when a restore point is saved), and Persian labels for every fact. High-risk actions require typing the resource name into an LTR confirm field. The raised footer holds the reassurance note with a Ctrl/⌘+↵ kbd hint and Deny (ghost) / Approve (primary, or danger when high risk). In the Yara sidebar and under 560px the footer stacks and the buttons share the width. Esc moves focus to Deny (never denies on its own). A failed run states in Persian that nothing changed, with the raw API error as a faint LTR line. After an app change the result row shows a verification pill with HTTP status and latency. Approval success draws its check stroke in 380ms.
 
 ### Yara Sidebar
 Full-height column on sidebar graphite with a 35px head (logo mark, conversation title, new / history / close icon buttons). History swaps the thread for a 34px-row list of past conversations with relative times and a hover delete action. Inside, assistant turns drop the avatar column, user turns are raised-graphite bubbles at 8px radius, evidence "steps" are 36px collapsible rows inside a seam-bordered card, and the composer is an 8px box without shadow that takes an accent-line border on focus.
 
+### Health vocabulary
+One set of words and colors for app health everywhere (Overview, app page, Monitoring, chat): سالم (ok), مشکل‌دار (warn), از دسترس خارج (danger), خاموش / نامشخص (neutral). The monitor's live status overrides the platform's container status. **Cause list:** ranked rows on the editor background, 20px numbered disc, a confidence meter with «اطمینان ٪», evidence lines with an eye icon, the fix line with a wrench icon; the top cause takes an accent-line border. **Diagnosis card** (chat): health pill header, a 1px-gapped facts grid (site response, CPU and memory as % of plan, last deploy), the summary, the top three causes, and a faint «فقط بررسی شد؛ چیزی تغییر نکرد» footer. **Incident banner:** a full-width row above page content with a tinted danger (or warn) border and background, app and state in bold, the top cause and age, and «علت‌ها» / «رفع با یارا» actions. Severity is carried by tint and pill, never by a side stripe.
+
+### Chat states
+The empty state leads with «چه مشکلی پیش آمده؟», a three-line trust legend (read-only checks run automatically; every change waits for approval; results are re-checked), and up to five short suggestions led by open incidents (danger icon, 600 weight). The agent roster sits behind «یارا چطور کار می‌کند؟». Automatic reads are captioned «بررسی خودکار · فقط خواندنی». While working, a status row shows the acting agent, what it is doing in words, elapsed seconds and a Stop button. A failed request shows a tinted card stating nothing changed, with «تلاش دوباره» and a link to Monitoring.
+
 ### Data Table
-Full-width, 13px, 40px rows with seam bottoms, 32px raised-graphite heads at 11.5px/700 text-3, hover veil per row, row links at 650 that turn accent on hover, inline meters (56×4px) and tabular metrics, trailing row actions at 55% opacity until hover.
+Full-width, 13px, 40px rows with seam bottoms, 32px raised-graphite heads at 11.5px/700 text-3, hover veil per row, row links at 650 that turn accent on hover, inline meters (56×4px) and tabular metrics, trailing row actions at 55% opacity until hover. Wrapped in `.table-scroll` (position: relative, so visually-hidden headers scroll with the table instead of widening the page); the monitoring table becomes stacked cards with inline labels when its editor is narrower than 680px. On coarse pointers icon buttons grow to 40px.
 
 ## Do's and Don'ts
 
@@ -330,4 +345,6 @@ Full-width, 13px, 40px rows with seam bottoms, 32px raised-graphite heads at 11.
 - **Don't** add uppercase or letter-spaced labels; hierarchy comes from YekanBakh's weight axis.
 - **Don't** theme the console or logs light; terminal surfaces stay dark.
 - **Don't** imitate Liara's branding or use its marks.
+- **Don't** use a colored side stripe (border-inline-start > 1px) on cards, banners or callouts; tint the border and background instead.
+- **Don't** show internal tool names (diagnoseApp, rollbackChange) as user text; agent context travels hidden.
 - **Don't** use metaphor-driven decoration (stamps, tickets, forms, transit); this is a product tool.

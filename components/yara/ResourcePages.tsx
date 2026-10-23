@@ -6,7 +6,7 @@ import { bytesFa, faDigits, relativeFa } from "@/lib/fa";
 import { MetricView } from "./Evidence";
 import { useWorkbench } from "./Workbench";
 
-function useDetail<T>(url: string) {
+export function useDetail<T>(url: string) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -30,7 +30,7 @@ function useDetail<T>(url: string) {
   return { data, error, loading, load };
 }
 
-function Skeleton() {
+export function Skeleton() {
   return (
     <div className="box">
       <div className="body" style={{ display: "grid", gap: 12 }}>

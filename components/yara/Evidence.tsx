@@ -8,7 +8,12 @@ import {
   Check,
   ChevronLeft,
   Database,
+  FileCode,
   FileText,
+  FolderTree,
+  GitCompare,
+  Laptop,
+  ScanSearch,
   FolderArchive,
   Globe,
   HardDrive,
@@ -60,6 +65,13 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   getObjectDownloadLink: FileText,
   searchLiaraDocs: Search,
   readLiaraDocsPage: BookOpen,
+  listWorkspaces: Laptop,
+  listFiles: FolderTree,
+  readFile: FileCode,
+  searchCode: ScanSearch,
+  detectProject: ScanSearch,
+  gitChanges: GitCompare,
+  getBuildLogs: ScrollText,
 };
 
 // ---------- evidence renderers ----------

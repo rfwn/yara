@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Boxes, CornerDownLeft, LayoutDashboard, MessageSquare, Moon, Plus, Search, Settings, SquareTerminal, Sun, Upload, type LucideIcon } from "lucide-react";
+import { Activity, Bot, Boxes, CornerDownLeft, LayoutDashboard, MessageSquare, Moon, Plus, Search, Settings, ShieldCheck, SquareTerminal, Sun, Upload, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppSummary, CaseSummary } from "./Workbench";
@@ -75,6 +75,8 @@ export function CommandPalette({
           onDeploy();
         },
       },
+      { id: "monitoring", group: "کارها", label: "پایش و سلامت، حادثه‌ها", icon: Activity, run: go("/app/monitoring") },
+      { id: "audit", group: "کارها", label: "سوابق تغییرات", icon: ShieldCheck, run: go("/app/audit") },
       { id: "settings", group: "کارها", label: "تنظیمات", icon: Settings, run: go("/app/settings") },
       { id: "dark", group: "کارها", label: "پوسته‌ی تیره", icon: Moon, run: setTheme("dark") },
       { id: "light", group: "کارها", label: "پوسته‌ی روشن", icon: Sun, run: setTheme("light") },

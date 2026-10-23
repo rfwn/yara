@@ -57,7 +57,7 @@
     --border-strong: #d0d0d0;
     --text: #1f1f1f;
     --text-2: #555a62;
-    --text-3: #6b7078;
+    --text-3: #646971;
     --accent: #005fb8;
     --accent-hover: #0258a8;
     --accent-soft: rgb(0 95 184 / 0.1);
@@ -88,7 +88,7 @@
   --border-strong: #d0d0d0;
   --text: #1f1f1f;
   --text-2: #555a62;
-  --text-3: #6b7078;
+  --text-3: #646971;
   --accent: #005fb8;
   --accent-hover: #0258a8;
   --accent-soft: rgb(0 95 184 / 0.1);
@@ -237,7 +237,7 @@ kbd {
   padding: 0 5px;
   border: 1px solid var(--border-strong);
   border-bottom-width: 2px;
-  border-radius: 5px;
+  border-radius: var(--r);
   background: var(--surface-2);
   color: var(--text-2);
   font-size: 11px;
@@ -501,7 +501,7 @@ kbd {
   place-items: center;
   width: 24px;
   height: 24px;
-  border-radius: 7px;
+  border-radius: var(--r);
   background: var(--accent);
   color: #fff;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2), var(--shadow-sm);
@@ -749,7 +749,7 @@ kbd {
 .md :not(pre) > code {
   font-size: 0.86em;
   padding: 1px 5px;
-  border-radius: 5px;
+  border-radius: var(--r);
   background: var(--surface-3);
   border: 1px solid var(--border);
   direction: ltr;
@@ -892,7 +892,7 @@ kbd {
   align-items: center;
   height: 22px;
   padding: 0 7px;
-  border-radius: 5px;
+  border-radius: var(--r);
   background: var(--surface-3);
   border: 1px solid var(--border);
   font-family: var(--mono);
@@ -1134,7 +1134,7 @@ kbd {
   width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: 9px;
+  border-radius: var(--r-lg);
 }
 
 .composer-note {

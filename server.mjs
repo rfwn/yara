@@ -9,7 +9,7 @@ import path from "node:path";
 import next from "next";
 import { WebSocket, WebSocketServer } from "ws";
 
-const port = Number(process.env.PORT || 3000);
+const port = Number(process.env.PORT || 3001);
 const dev = process.env.NODE_ENV !== "production";
 // Overridable for local testing against a mock exec endpoint.
 const LIARA_EXEC = process.env.LIARA_EXEC_URL || "wss://api.iran.liara.ir/v1/exec";
@@ -79,6 +79,69 @@ wss.on("connection", (client, _req, session) => {
   client.on("close", () => upstream.close());
 });
 
+// ---- local runners (runner/yara-runner.mjs) ----
+// Registered on globalThis so Next route handlers in this process can reach them (lib/server/workspaces.ts).
+const runners = (globalThis.__yaraRunners ??= new Map());
+const runnerWss = new WebSocketServer({ noServer: true, maxPayload: 300 * 1024 * 1024 });
+
+function runnerUser(token) {
+  db ??= new Database(DB_PATH);
+  const hash = crypto.createHash("sha256").update(token).digest("hex");
+  return db.prepare("SELECT id FROM users WHERE runner_token_hash = ?").get(hash)?.id ?? null;
+}
+
+runnerWss.on("connection", (ws, _req, userId) => {
+  let id = "";
+  const pending = new Map();
+  let seq = 0;
+  ws.once("message", (raw) => {
+    let hello;
+    try {
+      hello = JSON.parse(raw.toString()).hello;
+    } catch {}
+    if (!hello) return ws.close(4400, "expected hello");
+    // Stable per user + runner name + folder, so a reconnect keeps the same workspace id.
+    id = crypto.createHash("sha256").update(`${userId}|${hello.name}|${hello.root}`).digest("hex").slice(0, 10);
+    runners.get(id)?.socket.close(4409, "replaced by a newer connection");
+    runners.set(id, {
+      id,
+      socket: ws,
+      userId,
+      name: String(hello.name ?? "runner").slice(0, 60),
+      root: String(hello.root ?? "").slice(0, 300),
+      platform: String(hello.platform ?? ""),
+      call: (method, params, timeoutMs = 120_000) =>
+        new Promise((resolve, reject) => {
+          const n = ++seq;
+          const timer = setTimeout(() => {
+            pending.delete(n);
+            reject(new Error(`Local runner timed out on ${method}`));
+          }, timeoutMs);
+          pending.set(n, { resolve, reject, timer });
+          ws.send(JSON.stringify({ id: n, method, params }));
+        }),
+    });
+    console.log(`[runner] ${hello.name} connected (${id})`);
+    ws.on("message", (raw2) => {
+      let msg;
+      try {
+        msg = JSON.parse(raw2.toString());
+      } catch {
+        return;
+      }
+      const p = pending.get(msg.id);
+      if (!p) return;
+      pending.delete(msg.id);
+      clearTimeout(p.timer);
+      msg.error ? p.reject(new Error(msg.error)) : p.resolve(msg.result);
+    });
+  });
+  ws.on("close", () => {
+    if (runners.get(id)?.socket === ws) runners.delete(id);
+    for (const p of pending.values()) p.reject(new Error("Local runner disconnected"));
+  });
+});
+
 const app = next({ dev, port });
 const handle = app.getRequestHandler();
 
@@ -86,14 +149,19 @@ await app.prepare();
 
 const server = createServer((req, res) => handle(req, res));
 
-// Next attaches its own "upgrade" listener on first request; keep it away from the shell path.
-const isShell = (req) => (req.url ?? "").startsWith("/ws/shell");
+// Next attaches its own "upgrade" listener on first request; keep it away from our socket paths.
+const isShell = (req) => (req.url ?? "").startsWith("/ws/shell") || (req.url ?? "").startsWith("/ws/runner");
 const on = server.on.bind(server);
 server.on = (event, listener) =>
   event === "upgrade" ? on(event, (req, socket, head) => (isShell(req) ? undefined : listener(req, socket, head))) : on(event, listener);
 
 on("upgrade", (req, socket, head) => {
   if (!isShell(req)) return;
+  if (req.url.startsWith("/ws/runner")) {
+    const userId = runnerUser(new URL(req.url, "http://x").searchParams.get("token") ?? "");
+    if (!userId) return socket.end("HTTP/1.1 401 Unauthorized\r\n\r\n");
+    return runnerWss.handleUpgrade(req, socket, head, (ws) => runnerWss.emit("connection", ws, req, userId));
+  }
   try {
     const ticket = new URL(req.url, "http://x").searchParams.get("ticket") ?? "";
     const session = redeemTicket(ticket);
@@ -108,4 +176,25 @@ on("upgrade", (req, socket, head) => {
   }
 });
 
-server.listen(port, () => console.log(`> Yara ready on http://localhost:${port} (${dev ? "dev" : "production"})`));
+// ---- monitoring loop ----
+// Every minute, ask the app to run due health checks and routines (lib/server/monitor.ts).
+// The key is derived from APP_SECRET like lib/server/crypto.ts internalKey(), so only this process can trigger a tick.
+const MONITOR_EVERY_MS = Number(process.env.MONITOR_TICK_SECONDS || 60) * 1000;
+async function monitorTick() {
+  try {
+    const key = crypto.createHmac("sha256", secretKey()).update("monitor-tick").digest("hex");
+    const res = await fetch(`http://127.0.0.1:${port}/api/monitor/tick`, { method: "POST", headers: { "x-yara-internal": key } });
+    if (!res.ok && res.status !== 202) console.error(`[monitor] tick answered ${res.status}`);
+  } catch (e) {
+    // No secret key yet (fresh install before the first sign-up), or the app is still compiling.
+    if (dev) console.warn("[monitor] tick skipped:", e instanceof Error ? e.message : e);
+  }
+}
+
+server.listen(port, () => {
+  console.log(`> Yara ready on http://localhost:${port} (${dev ? "dev" : "production"})`);
+  if (process.env.MONITOR_DISABLED !== "1") {
+    setTimeout(monitorTick, 15_000);
+    setInterval(monitorTick, MONITOR_EVERY_MS).unref();
+  }
+});

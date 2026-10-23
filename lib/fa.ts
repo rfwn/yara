@@ -2,7 +2,14 @@
 
 const FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
 
-export const faDigits = (v: string | number) => String(v).replace(/\d/g, (d) => FA_DIGITS[Number(d)]);
+/** Persian digits; a decimal point between digits becomes the Persian decimal separator «٫». */
+export const faDigits = (v: string | number) =>
+  String(v)
+    .replace(/(\d)\.(\d)/g, "$1٫$2")
+    .replace(/\d/g, (d) => FA_DIGITS[Number(d)]);
+
+/** A number for people: Persian digits, thousands grouped («۱٬۲۰۰»), at most `decimals` decimals. */
+export const faNum = (n: number, decimals = 0) => n.toLocaleString("fa-IR", { maximumFractionDigits: decimals });
 
 const dateFmt = new Intl.DateTimeFormat("fa-IR-u-ca-persian", { year: "numeric", month: "2-digit", day: "2-digit" });
 const longDateFmt = new Intl.DateTimeFormat("fa-IR-u-ca-persian", { day: "numeric", month: "long", year: "numeric" });

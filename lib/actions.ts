@@ -1,12 +1,15 @@
 // Infrastructure-changing actions. The model can only *propose* these: the tools it
 // sees have no execute(), the UI asks the user, and /api/actions runs them here.
 import { z } from "zod";
-import { enc, withKeyVariants, type Env, type LiaraClient, type Project } from "./liara";
+import { enc, LiaraError, withKeyVariants, type Env, type LiaraClient, type Project } from "./liara";
+import { appPlanOptions } from "./plans";
 import { execOnce } from "./server/exec";
+import { operationKeys, resolveVM, VM_OSES, VM_PLANS, VM_POWER, waitForOperation } from "./vms";
 
 const PLATFORMS = ["node", "next", "laravel", "php", "python", "django", "flask", "dotnet", "react", "angular", "vue", "static", "docker", "go"] as const;
 
 const app = z.string().min(1).describe("App name (its project_id in Liara)");
+const vm = z.string().min(1).describe("VM name or id");
 
 type ActionDef<S extends z.ZodTypeAny> = {
   description: string;
@@ -20,7 +23,7 @@ async function currentEnvs(c: LiaraClient, name: string) {
   return project.envs ?? [];
 }
 
-const updateEnvs = (c: LiaraClient, project: string, variables: Env[]) =>
+export const updateEnvs = (c: LiaraClient, project: string, variables: Env[]) =>
   c.post("/v1/projects/update-envs", { project, variables: variables.map(({ key, value, encrypted }) => ({ key, value, encrypted })) });
 
 export const actions = {
@@ -66,14 +69,28 @@ export const actions = {
     run: (c, i) => c.post(`/v1/projects/${enc(i.app)}/resize`, { planID: i.planID }),
   }),
   createApp: action({
-    description: "Create a new app. Names are lowercase letters, digits and dashes, globally unique. Use getAccountOverview for plan IDs.",
+    description:
+      "Create a new app on Liara (needed before the first deploy). Call recommendAppPlan first and use its planID and bundlePlanID. Names are lowercase letters, digits and dashes, and globally unique across Liara.",
     input: z.object({
       name: z.string().regex(/^[a-z0-9-]{3,32}$/, "3-32 chars: a-z, 0-9, -"),
       platform: z.enum(PLATFORMS),
       planID: z.string().min(1),
+      bundlePlanID: z.string().optional().describe("Feature bundle (basic/standard/pro) from recommendAppPlan; defaults to the cheapest available"),
       network: z.string().optional().describe("Private network name, if any"),
     }),
-    run: (c, i) => c.post("/v1/projects", { name: i.name, platform: i.platform, planID: i.planID, network: i.network }),
+    run: async (c, i) => {
+      const bundlePlanID = i.bundlePlanID ?? (await appPlanOptions(c)).bundles(i.planID)[0]?.id;
+      try {
+        await c.post("/v1/projects/", { name: i.name, platform: i.platform, planID: i.planID, bundlePlanID, network: i.network, readOnlyRootFilesystem: false });
+      } catch (e) {
+        // Same cases the CLI distinguishes (src/commands/app/create.ts).
+        if (e instanceof LiaraError && e.status === 409) throw new Error(`The name "${i.name}" is already taken on Liara (names are global). Propose another name, e.g. "${i.name}-${Math.random().toString(36).slice(2, 6)}".`);
+        if (e instanceof LiaraError && e.status === 402) throw new Error("Not enough balance on the Liara account to create this app. The user must top up in the Liara console (payments are not available via API).");
+        if (e instanceof LiaraError && e.status === 403) throw new Error(`Liara refused: ${e.message}. The free plan allows one app and not every platform; pick a paid plan.`);
+        throw e;
+      }
+      return { created: i.name, platform: i.platform, planID: i.planID, bundlePlanID, next: "Now deploy to it with deployWorkspace (same app name)." };
+    },
   }),
   deleteApp: action({
     description: "Permanently delete an app. Destructive and irreversible.",
@@ -177,7 +194,81 @@ export const actions = {
     input: z.object({ bucket: z.string().min(1) }),
     run: (c, i) => c.storage.delete(`/api/v1/buckets/${enc(i.bucket)}`),
   }),
+
+  // ---- virtual machines: every change waits for its operation and reports the verified final state ----
+  setVMPower: action({
+    description:
+      "Power a VM: start, reboot, shutdown (graceful, asks the OS) or stop (forced, like pulling the plug; only when shutdown hangs). Waits for Liara to finish the operation and returns the verified final state.",
+    input: z.object({ vm, action: z.enum(VM_POWER) }),
+    run: (c, i) => vmChange(c, i.vm, (id) => c.iaas.patch(`/vm/power/${enc(id)}`, { action: i.action })),
+  }),
+  resizeVM: action({
+    description: "Change a VM's plan (CPU/RAM/disk). Use listVMPlans first. The VM may need to restart.",
+    input: z.object({ vm, plan: z.enum(VM_PLANS) }),
+    run: (c, i) => vmChange(c, i.vm, (id) => c.iaas.patch(`/vm/resize/${enc(id)}`, { plan: i.plan })),
+  }),
+  createVMDisk: action({
+    description: "Attach a new disk to a VM (size in GB). getVMDisks shows the space available.",
+    input: z.object({ vm, size: z.number().int().positive() }),
+    run: (c, i) => vmChange(c, i.vm, (id) => c.iaas.post(`/vm/disk/${enc(id)}`, { size: i.size })),
+  }),
+  extendVMDisk: action({
+    description: "Grow an existing VM disk to newSize GB (cannot shrink). The filesystem inside the VM must be grown separately.",
+    input: z.object({ vm, diskId: z.string().min(1), newSize: z.number().int().positive() }),
+    run: (c, i) => vmChange(c, i.vm, (id) => c.iaas.post(`/vm/disk/${enc(id)}/${enc(i.diskId)}`, { newSize: i.newSize })),
+  }),
+  deleteVMDisk: action({
+    description: "Permanently delete a disk from a VM and all data on it.",
+    input: z.object({ vm, diskId: z.string().min(1) }),
+    run: (c, i) => vmChange(c, i.vm, (id) => c.iaas.delete(`/vm/disk/${enc(id)}/${enc(i.diskId)}`)),
+  }),
+  resetVMNetwork: action({
+    description: "Reset a VM's network configuration (fixes a VM that lost connectivity after network changes). The VM must be powered off first.",
+    input: z.object({ vm }),
+    run: async (c, i) => ({ ...(await vmChange(c, i.vm, (id) => c.iaas.post(`/vm/reset-network/${enc(id)}`))), next: "The VM is still powered off. Tell the user, and propose setVMPower start so they can use it again; don't tell them to log in before it is on." }),
+  }),
+  resetVMPassword: action({
+    description: "Generate a new root password for a VM (the VM must be powered off). The password is shown only to the user, never to you.",
+    input: z.object({ vm }),
+    run: async (c, i) => {
+      const v = await resolveVM(c, i.vm);
+      const r = await c.iaas.post<{ password?: string }>(`/vm/reset-password/${enc(v._id)}`);
+      return { vm: v.name, reset: true, secret: r?.password ? { label: `رمز تازه‌ی root برای ${v.name}`, value: r.password } : undefined, next: "The VM is still powered off. Tell the user, and propose setVMPower start so they can use it again; don't tell them to log in before it is on." };
+    },
+  }),
+  unfreezeVM: action({
+    description: "Unfreeze a VM that Liara froze for low balance (needs enough account balance).",
+    input: z.object({ vm }),
+    run: (c, i) => vmChange(c, i.vm, (id) => c.iaas.post(`/vm/unfreeze/${enc(id)}`)),
+  }),
+  createVM: action({
+    description: "Create a new VM. Use listVMPlans for plans and OS versions. Costs money from the moment it exists.",
+    input: z.object({
+      name: z.string().regex(/^[a-z0-9-]{3,32}$/, "3-32 chars: a-z, 0-9, -"),
+      os: z.string().regex(/^[a-z]+-[\w.-]+$/).describe(`"<name>-<version>" from listVMPlans' operatingSystems, e.g. ${VM_OSES.join(", ")}`),
+      plan: z.enum(VM_PLANS),
+      sshPort: z.string().regex(/^\d{2,5}$/).optional(),
+      sshKeys: z.array(z.string().min(20)).max(10).optional().describe("Public SSH keys to install"),
+    }),
+    run: (c, i) => c.iaas.post("/vm", { name: i.name, OS: i.os, plan: i.plan, config: { sshPort: i.sshPort, SSHKeys: i.sshKeys ?? [] } }),
+  }),
+  deleteVM: action({
+    description: "Permanently delete a VM with all its disks and data. Destructive and irreversible.",
+    input: z.object({ vm }),
+    run: async (c, i) => {
+      const v = await resolveVM(c, i.vm);
+      return { vm: v.name, ...(await c.iaas.delete<object>(`/vm/${enc(v._id)}`)) };
+    },
+  }),
 };
+
+/** Runs one VM change and verifies it: snapshot operations, act, wait for the new operation to finish. */
+async function vmChange(c: LiaraClient, ref: string, act: (id: string) => Promise<unknown>) {
+  const v = await resolveVM(c, ref);
+  const before = await operationKeys(c, v._id);
+  const response = await act(v._id);
+  return { vm: v.name, response: response ?? null, verification: await waitForOperation(c, v._id, before) };
+}
 
 export type ActionName = keyof typeof actions;
 

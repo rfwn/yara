@@ -2,6 +2,9 @@ import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { actionList } from "./actions";
 import { readDocsPage, searchDocs } from "./docs";
+import { listVMs, resolveVM, vmDetails, vmOperations, vmTraffic, VM_API_LIMITS } from "./vms";
+import { diagnose } from "./monitor/diagnose";
+import { gatherEvidence } from "./monitor/evidence";
 import { enc, LiaraError, maskEnvs, withKeyVariants, nowSec, summarizeSeries, type LiaraClient, type LogLine, type Project, type Reports } from "./liara";
 
 const app = z.string().min(1).describe("App name (project_id)");
@@ -173,19 +176,35 @@ export function readTools(c: LiaraClient) {
 
     diagnoseApp: tool({
       description:
-        "One-shot health check of an app: config, latest releases, error-like log lines from the last hour, recent events, and CPU/memory. Start here when the user reports something broken.",
-      inputSchema: z.object({ app }),
-      execute: async ({ app }) => {
+        "One-shot health check of an app: probes its public URL (HTTP status + latency), reads CPU/RAM against the plan's limits, error-like log lines, the latest release and platform events, then returns a health status and the likely causes RANKED by confidence, each with its evidence and fix. Start here when the user reports something broken or slow.",
+      inputSchema: z.object({ app, path: z.string().optional().describe("Health path to probe, e.g. /health (default /)") }),
+      execute: async ({ app, path }) => {
         const base = `/v1/projects/${enc(app)}`;
-        const [project, releases, logs, events, cpu, memory] = await Promise.all([
-          settle(c.get<{ project: Project }>(base).then(({ project: p }) => ({ platform: p.type, status: p.status, on: p.scale > 0, plan: p.planID, envKeys: (p.envs ?? []).map((e) => e.key) }))),
-          settle(c.get<any>(`${base}/releases`, { page: 1, count: 3 }).then((r) => (r.releases ?? []).map((x: any) => ({ state: x.state, createdAt: x.createdAt, port: x.port })))),
-          settle(fetchLogs(c, app, 60, 60, true)),
-          settle(c.get<any>(`${base}/events`, { start: nowSec() - 24 * 3600, end: nowSec() }).then((d) => (Array.isArray(d) ? d : (d?.events ?? [])).slice(0, 15))),
-          settle(fetchMetric(c, base, "cpu", 3)),
-          settle(fetchMetric(c, base, "memory", 3)),
+        const [ev, envKeys, recentErrors] = await Promise.all([
+          gatherEvidence(c, app, { path, logMinutes: 30 }),
+          settle(c.get<{ project: Project }>(base).then(({ project: p }) => (p.envs ?? []).map((e) => e.key))),
+          settle(fetchLogs(c, app, 60, 40, true)),
         ]);
-        return { app, project, releases, recentErrors: logs, events, cpu, memory };
+        const health = diagnose(ev);
+        const pctOf = (v: number | undefined, max: number | null) => (v !== undefined && max ? Math.round((v / max) * 100) : null);
+        return {
+          app,
+          health,
+          probe: ev.probe ?? (ev.url ? null : "No public URL (default subdomain off and no domain): HTTP health cannot be probed."),
+          resources: {
+            plan: ev.plan,
+            cpu: ev.cpu && { ...ev.cpu, unit: "cores", limit: ev.cpuLimit, avgPctOfPlan: pctOf(ev.cpu.avg, ev.cpuLimit), maxPctOfPlan: pctOf(ev.cpu.max, ev.cpuLimit) },
+            memory: ev.memory && { last: ev.memory.last, max: ev.memory.max, unit: "bytes", limit: ev.memLimit, lastPctOfPlan: pctOf(ev.memory.last, ev.memLimit), maxPctOfPlan: pctOf(ev.memory.max, ev.memLimit) },
+          },
+          status: ev.status,
+          on: ev.on,
+          latestRelease: ev.release,
+          recentErrors,
+          events: ev.events,
+          envKeys,
+          dataGaps: ev.gaps,
+          next: "Explain the top cause in plain words with its evidence, propose the fix, and after any fix verify it (probeApp or diagnoseApp again). Do not claim it is fixed without that check.",
+        };
       },
     }),
 
@@ -353,6 +372,51 @@ export function readTools(c: LiaraClient) {
       execute: async ({ bucket, object, expiry }) => {
         const r = await withKeyVariants(object, (seg) => c.storage.get<any>(`/api/v1/buckets/${enc(bucket)}/download/${seg}`, { expiry }));
         return { url: r.data?.url ?? r.url ?? r, expiry };
+      },
+    }),
+
+    listVMs: tool({
+      description: "Virtual machines (Liara IaaS) with state, power, OS and plan.",
+      inputSchema: z.object({}),
+      execute: async () => (await listVMs(c)).map((v) => ({ id: v._id, name: v.name, state: v.state, power: v.power, os: v.OS, plan: v.plan, created: v.createdAt })),
+    }),
+
+    getVM: tool({
+      description: `One VM: power and guest state, OS, plan with CPU/RAM/disk size and price, IPs, SSH port. Credentials are never returned. ${VM_API_LIMITS}`,
+      inputSchema: z.object({ vm: z.string().describe("VM name or id") }),
+      execute: ({ vm }) => vmDetails(c, vm),
+    }),
+
+    getVMOperations: tool({
+      description: "Recent operations on a VM (power changes, resizes, disk changes) with their state: use it to see what happened to a VM and whether a change succeeded.",
+      inputSchema: z.object({ vm: z.string().describe("VM name or id") }),
+      execute: async ({ vm }) => {
+        const v = await resolveVM(c, vm);
+        return { vm: v.name, operations: (await vmOperations(c, v._id)).slice(0, 20) };
+      },
+    }),
+
+    getVMDisks: tool({
+      description: "Disks attached to a VM and the space still available to add.",
+      inputSchema: z.object({ vm: z.string().describe("VM name or id") }),
+      execute: async ({ vm }) => {
+        const v = await resolveVM(c, vm);
+        return c.iaas.get(`/vm/disk/${enc(v._id)}`);
+      },
+    }),
+
+    getVMTraffic: tool({
+      description: "Network traffic of a VM: total MB per destination IP and MB per 5-minute bucket. The only usage signal the VM API offers. Liara only serves short windows (a few hours).",
+      inputSchema: z.object({ vm: z.string().describe("VM name or id"), hours: z.number().min(0.25).max(12).default(1) }),
+      execute: ({ vm, hours }) => vmTraffic(c, vm, hours),
+    }),
+
+    listVMPlans: tool({
+      description: "VM plans with CPU, RAM, disk, region and price, plus the available operating systems.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const [plans, oss] = await Promise.all([settle(c.iaas.get<{ plans: unknown }>("/plans").then((r) => compactPlans({ vm: r.plans }))), settle(c.iaas.get("/oss"))]);
+        return { plans, operatingSystems: oss };
       },
     }),
 
