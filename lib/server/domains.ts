@@ -1,6 +1,9 @@
 import "server-only";
 import { promises as dns } from "node:dns";
+import net from "node:net";
+import tls from "node:tls";
 import { enc, type LiaraClient } from "../liara";
+import { vmSshTarget } from "../vms";
 
 // Guided domain setup. Liara's API can attach a domain to an app, host its DNS zone and issue SSL,
 // but the registrar step (IRNIC for .ir, or whoever sold the domain) is outside any API. This module
@@ -75,7 +78,7 @@ async function liveDns(domain: string, registrable: string) {
     const [cname, a, ns] = await Promise.all([quiet(dns.resolveCname(domain)), quiet(dns.resolve4(domain)), quiet(dns.resolveNs(registrable))]);
     return { cname: cname.map((x) => x.toLowerCase()), a, ns: ns.map((x) => x.toLowerCase()) };
   } catch (e) {
-    return { cname: [], a: [], ns: [], error: e instanceof Error ? e.message : String(e) };
+    return { cname: [] as string[], a: [] as string[], ns: [] as string[], error: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -83,8 +86,89 @@ type RawDomain = { _id: string; name: string; status?: string; certificatesStatu
 const connected = (s?: string) => /ok|connect|active|verified|ready/i.test(s ?? "");
 const sslOk = (s?: string) => /ok|active|issued|ready|valid/i.test(s ?? "");
 
-export async function domainGuide(c: LiaraClient, rawDomain: string, opts: { app?: string; recheck?: boolean } = {}): Promise<DomainGuide> {
+const tcpOpen = (host: string, port: number) =>
+  new Promise<boolean>((resolve) => {
+    const s = net.connect({ host, port, timeout: 4000 });
+    const done = (v: boolean) => (s.destroy(), resolve(v));
+    s.on("connect", () => done(true));
+    s.on("timeout", () => done(false));
+    s.on("error", () => done(false));
+  });
+
+/** TLS handshake against the VM's own address with the domain as SNI: is a valid certificate for this name being served? */
+const certFor = (host: string, servername: string) =>
+  new Promise<{ ok: boolean; issuer?: string; daysLeft?: number; error?: string }>((resolve) => {
+    const s = tls.connect({ host, port: 443, servername, timeout: 5000, rejectUnauthorized: false });
+    const done = (v: { ok: boolean; issuer?: string; daysLeft?: number; error?: string }) => (s.destroy(), resolve(v));
+    s.on("secureConnect", () => {
+      const c = s.getPeerCertificate();
+      const days = c.valid_to ? Math.floor((new Date(c.valid_to).getTime() - Date.now()) / 86_400_000) : undefined;
+      done({ ok: s.authorized, issuer: c.issuer?.O ?? c.issuer?.CN, daysLeft: days, error: s.authorized ? undefined : String(s.authorizationError) });
+    });
+    s.on("timeout", () => done({ ok: false, error: "timeout" }));
+    s.on("error", (e) => done({ ok: false, error: (e as NodeJS.ErrnoException).code ?? e.message }));
+  });
+
+/**
+ * A domain on a virtual machine: Liara's app-domain API does not apply. The domain points at the VM's
+ * public IP with an A record at the registrar, a web server answers on port 80, and certbot on the VM
+ * issues the certificate (runVmCommand).
+ */
+async function vmDomainGuide(c: LiaraClient, domain: string, vmRef: string, registrable: string, apex: boolean): Promise<DomainGuide> {
+  const registrar = registrarFor(registrable);
+  const vm = await vmSshTarget(c, vmRef);
+  const live = await liveDns(domain, registrable);
+  const ip = vm.host;
+  const pointed = !!ip && live.a.includes(ip);
+  const [http, cert] = ip ? await Promise.all([tcpOpen(ip, 80), certFor(ip, domain)]) : [false, { ok: false, error: "no ip" }];
+  const steps: GuideStep[] = [
+    {
+      id: "dns-a",
+      title: `رکورد A در ${registrar.name}`,
+      by: "user",
+      state: pointed ? "done" : ip ? "todo" : "blocked",
+      detail: pointed ? `دامنه به آدرس ماشین (${ip}) اشاره می‌کند.` : `${live.a.length ? `الان به ${live.a.join("، ")} اشاره می‌کند` : "رکورد A پیدا نشد"}؛ باید به آدرس ماشین ${ip ?? "?"} اشاره کند.`,
+    },
+    {
+      id: "web",
+      title: "وب‌سرور روی ماشین (پورت ۸۰)",
+      by: "yara",
+      state: http ? "done" : pointed ? "todo" : "blocked",
+      detail: http ? "ماشین روی پورت ۸۰ پاسخ می‌دهد." : "certbot برای گرفتن گواهی به وب‌سرور روی پورت ۸۰ نیاز دارد. یارا با تأیید شما nginx را بررسی یا نصب می‌کند (runVmCommand).",
+    },
+    {
+      id: "ssl",
+      title: "گواهی SSL با certbot روی ماشین",
+      by: "yara",
+      state: cert.ok ? "done" : http && pointed ? "todo" : "blocked",
+      detail: cert.ok ? `گواهی معتبر از ${cert.issuer ?? "?"} سرو می‌شود (${cert.daysLeft ?? "?"} روز مانده).` : "یارا با تأیید شما certbot را روی ماشین اجرا می‌کند و بعد گواهی را با یک اتصال TLS واقعی بررسی می‌کند.",
+    },
+  ];
+  const first = steps.find((s) => s.state !== "done");
+  return {
+    domain,
+    app: null,
+    apex,
+    registrable,
+    registrar,
+    liara: { found: false, target: ip },
+    live,
+    steps,
+    records: ip ? [{ where: registrar.name, type: "A", name: apex ? "@" : domain.slice(0, -(registrable.length + 1)), value: ip }] : [],
+    ready: !first,
+    next: !first
+      ? "Everything is done: the VM serves a valid certificate for this domain."
+      : first.by === "user"
+        ? "Next step is the user's: the A record at the registrar (no API). The card shows the exact record; ask them to press «بررسی دوباره» when done."
+        : first.id === "web"
+          ? "Next: runVmCommand to check the web server (systemctl status nginx; ss -tlnp), install nginx if missing (apt-get install -y nginx, approval), then domainGuide again."
+          : "Next: runVmCommand apt-get install -y certbot python3-certbot-nginx, then certbot --nginx -d <domain> --non-interactive --agree-tos -m <email> --redirect (ask for the email), then domainGuide again to verify.",
+  };
+}
+
+export async function domainGuide(c: LiaraClient, rawDomain: string, opts: { app?: string; vm?: string; recheck?: boolean } = {}): Promise<DomainGuide> {
   const domain = normalizeDomain(rawDomain);
+  if (opts.vm) return vmDomainGuide(c, domain, opts.vm, registrableOf(domain), domain === registrableOf(domain));
   const registrable = registrableOf(domain);
   const apex = domain === registrable;
   const registrar = registrarFor(registrable);

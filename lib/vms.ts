@@ -17,7 +17,7 @@ export const VM_POWER = ["start", "reboot", "shutdown", "stop"] as const;
 
 /** What the VM API cannot see. Agents quote this instead of guessing. */
 export const VM_API_LIMITS =
-  "Liara's VM API manages the machine from the outside only: no CPU/RAM usage, no system or app logs, no command execution inside the VM. Only network traffic and the operation history are available. For in-guest diagnosis the user can run the Yara runner on the VM, or connect over SSH themselves.";
+  "Liara's VM API manages the machine from the outside only: no CPU/RAM usage and no system or app logs; only network traffic and the operation history. For anything inside the VM, use runVmCommand (SSH as root with the password Liara holds); the user sees it in the VM's Console tab.";
 
 export async function listVMs(c: LiaraClient) {
   const { vms } = await c.iaas.get<{ vms: VM[] }>("/vm");

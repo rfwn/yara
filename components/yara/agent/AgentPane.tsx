@@ -26,7 +26,7 @@ const SUGGESTIONS: Suggestion[] = [
 ];
 
 // Tools with their own generative card; everything else read-only shows up in the steps list.
-const CARD_TOOLS = new Set(["updatePlan", "runCommand", "deployWorkspace", "editFile", "writeFile"]);
+const CARD_TOOLS = new Set(["updatePlan", "runCommand", "runVmCommand", "deployWorkspace", "editFile", "writeFile"]);
 
 /** Handoffs already sent. Module-level so a remount (Strict Mode, a chat-id change) never sends the same request twice. */
 const consumedAsks = new Set<number>();
@@ -151,6 +151,8 @@ export function AgentPane({
         for await (const ev of readEvents(res)) {
           if (ev.t === "done") break;
           if (ev.t === "result" && (ev.output as any)?.ok) wrote = true;
+          // Yara's commands on a VM stream into that VM's Console tab, in view.
+          if (ev.t === "ui" && ev.component === "command" && typeof ev.props?.vm === "string") wb.showVmCommand(ev.id, ev.props.vm as string, ev.props as never);
           // Yara's network checks also land in the Network tab, in view, like its console commands.
           if (ev.t === "result" && ev.name === "netCheck" && (ev.output as any)?.command) {
             const o = ev.output as { command: string; ok: boolean; output: string };
@@ -533,7 +535,7 @@ function renderItems(tl: Timeline, decide: (approved: boolean, confirmText?: str
       // Pending, denied or failed approvals show the full request; approved ones collapse into their result card.
       const showApproval = c.approval && (c.decision !== "approved" || !special || (c.done && !!(c.output as any)?.error));
       if (showApproval) group.push(<ApprovalCard key={`a-${c.id}`} call={c} onDecide={decide} autoFocus={!restored.has(c.id)} />);
-      if (c.name === "runCommand") group.push(<CommandCard key={c.id} call={c} />);
+      if (c.name === "runCommand" || c.name === "runVmCommand") group.push(<CommandCard key={c.id} call={c} />);
       else if (c.name === "deployWorkspace") group.push(<DeployCard key={c.id} call={c} />);
       else if (c.name === "editFile" || c.name === "writeFile") group.push(<EditCard key={c.id} call={c} />);
     }

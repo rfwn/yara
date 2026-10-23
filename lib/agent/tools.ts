@@ -9,6 +9,7 @@ import { probeUrl } from "../monitor/probe";
 import { domainGuide } from "../server/domains";
 import { auditNet } from "../server/audit";
 import { NET_HELP, runNetCommand, takeNetQuota } from "../server/nettools";
+import { execOnVm, VmSshError } from "../server/vmssh";
 import { checkApp, createRoutine, INTERVALS, listIncidents, listMonitors, listRoutines, upsertMonitor, uptime } from "../server/monitor";
 import { getPolicy } from "./policy";
 import { buildLogs, deployWorkspace } from "../server/deploy";
@@ -325,6 +326,16 @@ const liaraActionTools: Record<string, AgentTool> = Object.fromEntries(
         const m = ACTION_META[name];
         const input = args as Record<string, any>;
         let price: Record<string, unknown> | undefined;
+        // App-only domain actions: a VM name here is the classic mix-up; refuse with the right path.
+        if ((name === "addDomain" || name === "setAppFeature") && typeof input.app === "string") {
+          try {
+            await ctx.liara.get(`/v1/projects/${enc(input.app)}`);
+          } catch (e) {
+            if ((e as { status?: number }).status === 404)
+              throw new Error(`"${input.app}" is not a Liara app. If it is a virtual machine, Liara's domain API does not apply: point an A record at the VM's IP (domainGuide with vm), then use runVmCommand to run certbot on the VM.`);
+            throw e;
+          }
+        }
         if (name === "createApp") {
           const { appPlans, bundles } = await appPlanOptions(ctx.liara);
           const plan = appPlans.find((p) => p.id === input.planID);
@@ -510,9 +521,9 @@ const domainGuideTool = defineTool({
   name: "domainGuide",
   description:
     "Guided custom-domain setup, step by step: whether the domain is attached in Liara, what public DNS answers right now (live lookup), the exact records the user must enter at the registrar (IRNIC for .ir, with how-to), Liara verification and SSL. Shown to the user as a checklist card with a re-check button. Call it first for any domain request, after each step you take (addDomain, enableDomainSsl), and with recheck: true when the user says they changed DNS.",
-  schema: z.object({ domain: z.string().min(3), app: z.string().optional(), recheck: z.boolean().optional() }),
+  schema: z.object({ domain: z.string().min(3), app: z.string().optional().describe("Liara app name (for apps)"), vm: z.string().optional().describe("VM name (for a domain served by a virtual machine)"), recheck: z.boolean().optional() }),
   kind: "read",
-  run: (a, ctx) => domainGuide(ctx.liara, a.domain, { app: a.app ?? ctx.app, recheck: a.recheck }),
+  run: (a, ctx) => domainGuide(ctx.liara, a.domain, { app: a.vm ? undefined : (a.app ?? ctx.app), vm: a.vm, recheck: a.recheck }),
 });
 
 const netTool = defineTool({
@@ -529,6 +540,66 @@ ${NET_HELP}`,
       return r;
     } catch (e) {
       return { command: a.command, ok: false, output: e instanceof Error ? e.message : String(e) };
+    }
+  },
+});
+
+// Read-only inspection on a VM: runs without asking when the policy allows safe commands.
+// Every pipe segment must be one of these; no chaining, redirection or substitution.
+const VM_SAFE_SEGMENT =
+  /^(uname|uptime|whoami|hostname|id|date|df|du|free|ls|cat|head|tail|wc|grep|ps|ss|netstat|ip\s+(a|addr|route|r)|lsb_release|which|nproc|lscpu|lsblk|top\s+-bn1|systemctl\s+(status|is-active|is-enabled|list-units|list-unit-files)|journalctl|nginx\s+-[tTv]|apache2ctl\s+-[tSM]|certbot\s+certificates|ufw\s+status|docker\s+(ps|logs|images|stats\s+--no-stream)|curl\s+-s?I)\b[^;&`$<>]*$/i;
+// Irreversible or locking-out: always typed confirmation.
+const VM_DANGER =
+  /\brm\s+-[a-z]*r[a-z]*\s+\/(\s|$)|\bmkfs|\bdd\s+if=|\b(shutdown|poweroff|halt|reboot)\b|\bpasswd\b|\buserdel\b|\bufw\s+(disable|reset)|\biptables\s+-F|chmod\s+-R\s+777\s+\/|:\(\)\s*\{|>\s*\/dev\/sd/i;
+const vmCommandSafe = (cmd: string) => !touchesSecretFile(cmd) && !/[;&`]|\$\(|>|</.test(cmd) && cmd.split("|").every((s) => VM_SAFE_SEGMENT.test(s.trim()));
+
+const runVmCommand = defineTool({
+  name: "runVmCommand",
+  description:
+    "Run one shell command on one of the user's Liara virtual machines over SSH, as root. Yara logs in with the root password Liara holds for the VM (you never see it). Use it to inspect (systemctl status, journalctl -u x -n 100, df -h, free -h, nginx -t, ss -tlnp) and, with the user's approval, to change things (apt-get install -y …, edit configs, systemctl reload, certbot). Read-only commands run immediately; others wait for approval; destructive ones need the VM name typed. Non-interactive only: pass -y / --non-interactive flags; no editors or prompts. One step per call so the user can follow and approve each change. Output streams to the user's Console tab.",
+  schema: z.object({
+    vm: z.string().min(1).describe("VM name or id"),
+    command: z.string().min(1).max(2000),
+    timeoutSec: z.number().int().min(5).max(900).default(120).describe("Raise for apt or certbot (up to 900)"),
+    why,
+  }),
+  kind: "write",
+  autoApprove: (a) => vmCommandSafe(a.command),
+  approval: (a) => ({
+    kind: "command",
+    title: "اجرای دستور روی ماشین مجازی",
+    summary: `این دستور با دسترسی root روی ماشین **${a.vm}** اجرا می‌شود و خروجی‌اش در کنسول همین ماشین هم نشان داده می‌شود. رمز ورود را یارا خودش از لیارا می‌گیرد و جایی نشان داده نمی‌شود.`,
+    risk: VM_DANGER.test(a.command) ? "high" : "medium",
+    target: a.vm,
+    command: a.command,
+    confirmText: VM_DANGER.test(a.command) ? a.vm : undefined,
+  }),
+  run: async (a, ctx, ui) => {
+    ui("command", { command: a.command, vm: a.vm, status: "running", output: "" });
+    let live = "";
+    let last = 0;
+    try {
+      const r = await execOnVm(ctx.userId, ctx.liara, a.vm, a.command, {
+        timeoutMs: a.timeoutSec * 1000,
+        onData: (s) => {
+          live += s;
+          // Stream to the card and the Console tab a few times a second, not per chunk.
+          if (Date.now() - last > 300) {
+            last = Date.now();
+            ui("command", { command: a.command, vm: a.vm, status: "running", output: live.slice(-6000) });
+          }
+        },
+      });
+      ui("command", { command: a.command, vm: a.vm, status: "done", exitCode: r.exitCode, output: r.output.slice(-6000), durationMs: r.durationMs });
+      return {
+        ...r,
+        output: r.output.slice(-12_000),
+        ...(r.timedOut ? { next: "The command hit its timeout; it may still be running on the VM. Check with a read-only command before repeating it." } : r.exitCode ? { next: "Non-zero exit code: read the output, explain the error to the user and fix the cause before trying again." } : {}),
+      };
+    } catch (e) {
+      const stage = e instanceof VmSshError ? e.stage : "network";
+      ui("command", { command: a.command, vm: a.vm, status: "done", exitCode: null, output: `[${stage}] ${e instanceof Error ? e.message : String(e)}` });
+      throw e;
     }
   },
 });
@@ -570,6 +641,7 @@ export const AGENT_TOOLS = {
     probeApp,
     domainGuideTool,
     netTool,
+    runVmCommand,
     getMonitoring,
     setMonitor,
     scheduleRoutine,

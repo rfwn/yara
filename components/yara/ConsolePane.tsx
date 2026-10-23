@@ -22,7 +22,10 @@ export type ConsoleRunResult = { output: string; exitCode: number | null; timedO
 
 /** What the workbench can ask of a mounted console (used to run Yara's approved commands in view). */
 export type ConsoleController = {
-  run: (command: string) => Promise<ConsoleRunResult>;
+  /** App consoles run approved commands in view. */
+  run?: (command: string) => Promise<ConsoleRunResult>;
+  /** VM consoles print Yara's runVmCommand output. */
+  print?: (text: string) => void;
 };
 
 /**

@@ -37,6 +37,7 @@ import { DeployDialog, type UploadedSource } from "./DeployDialog";
 import { LogoMark } from "./Logo";
 import { LogsPane } from "./LogsPane";
 import { NetPane, type NetEntry } from "./NetPane";
+import { VmConsole, yaraCommandBlock } from "./VmConsole";
 import { useModKey } from "./useModKey";
 
 export type AppSummary = { name: string; platform: string; status: string; on: boolean };
@@ -66,6 +67,10 @@ type Ctx = {
   refreshCases: () => void;
   registerConsole: (app: string, c: ConsoleController) => () => void;
   runInConsole: (app: string, command: string) => Promise<ConsoleRunResult>;
+  /** Opens a VM's SSH terminal in the Console tab. */
+  openVmConsole: (vm: string) => void;
+  /** Mirrors Yara's runVmCommand into that VM's Console tab (streamed: only the new part is printed). */
+  showVmCommand: (callId: string, vm: string, p: { command: string; status: string; output?: string; exitCode?: number | null }) => void;
   /** Puts a network check Yara ran into the Network tab and shows it. */
   showNet: (entry: Omit<NetEntry, "id" | "by">) => void;
   openNet: () => void;
@@ -321,9 +326,39 @@ export function Workbench({
     setPanelTab("console");
     for (let i = 0; i < 30 && !consoles.current.get(app); i++) await new Promise((r) => setTimeout(r, 100));
     const c = consoles.current.get(app);
-    if (!c) throw new Error("console-unavailable");
+    if (!c?.run) throw new Error("console-unavailable");
     return c.run(command);
   }, []);
+
+  const openVmConsole = useCallback((vm: string) => {
+    setTarget(`vm:${vm}`);
+    setPanelMax(false);
+    setPanelOpen(true);
+    setPanelTab("console");
+  }, []);
+
+  // How much of each Yara VM command has been printed, so streamed updates only add the new tail.
+  const vmPrinted = useRef(new Map<string, number>());
+  const showVmCommand = useCallback(
+    async (callId: string, vm: string, p: { command: string; status: string; output?: string; exitCode?: number | null }) => {
+      const key = `vm:${vm}`;
+      if (!vmPrinted.current.has(callId)) openVmConsole(vm);
+      for (let i = 0; i < 30 && !consoles.current.get(key)?.print; i++) await new Promise((r) => setTimeout(r, 100));
+      const c = consoles.current.get(key);
+      if (!c?.print) return;
+      const out = (p.output ?? "").replace(/\r?\n/g, "\r\n");
+      const seen = vmPrinted.current.get(callId);
+      if (seen === undefined) {
+        c.print(yaraCommandBlock(p.command));
+        vmPrinted.current.set(callId, 0);
+      }
+      const from = vmPrinted.current.get(callId) ?? 0;
+      if (out.length > from) c.print(out.slice(from));
+      vmPrinted.current.set(callId, Math.max(from, out.length));
+      if (p.status === "done") c.print(`\r\n\x1b[2m[yara] exit ${p.exitCode ?? "?"}\x1b[0m\r\n`);
+    },
+    [openVmConsole],
+  );
 
   const openNet = useCallback(() => {
     setPanelMax(false);
@@ -447,8 +482,10 @@ export function Workbench({
       runInConsole,
       showNet,
       openNet,
+      openVmConsole,
+      showVmCommand,
     }),
-    [apps, refreshApps, openApp, askYara, incidents, health, refreshHealth, openConsole, openLogs, openDeploy, refreshCases, registerConsole, runInConsole, showNet, openNet],
+    [apps, refreshApps, openApp, askYara, incidents, health, refreshHealth, openConsole, openLogs, openDeploy, refreshCases, registerConsole, runInConsole, showNet, openNet, openVmConsole, showVmCommand],
   );
 
   const TabIcon = ({ t }: { t: Tab }) =>
@@ -682,10 +719,23 @@ export function Workbench({
                 ))}
                 <div className="ptools">
                   {apps.length > 0 && panelTab !== "net" && (
-                    <select className="target-select ltr" value={target} onChange={(e) => setTarget(e.target.value)} aria-label="برنامه">
-                      {apps.map((a) => (
-                        <option key={a.name}>{a.name}</option>
-                      ))}
+                    <select className="target-select ltr" value={target} onChange={(e) => setTarget(e.target.value)} aria-label="برنامه یا ماشین مجازی">
+                      <optgroup label="apps">
+                        {apps.map((a) => (
+                          <option key={a.name} value={a.name}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                      {vms.length > 0 && (
+                        <optgroup label="VMs (SSH)">
+                          {vms.map((v) => (
+                            <option key={v.id} value={`vm:${v.name}`}>
+                              {v.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   )}
                   <button type="button" className="icon-btn" onClick={() => setPanelMax((m) => !m)} aria-label={panelMax ? "کوچک کردن پنل" : "بزرگ کردن پنل"}>
@@ -697,13 +747,25 @@ export function Workbench({
                 </div>
               </div>
               <div className="panel-body" hidden={panelTab !== "console"}>
-                {target ? <ConsolePane key={target} app={target} active={panelOpen && panelTab === "console"} /> : <div className="term-overlay">برنامه‌ای انتخاب نشده است.</div>}
+                {target.startsWith("vm:") ? (
+                  <VmConsole key={target} vm={target.slice(3)} active={panelOpen && panelTab === "console"} />
+                ) : target ? (
+                  <ConsolePane key={target} app={target} active={panelOpen && panelTab === "console"} />
+                ) : (
+                  <div className="term-overlay">برنامه‌ای انتخاب نشده است.</div>
+                )}
               </div>
               <div className="panel-body" hidden={panelTab !== "net"}>
                 <NetPane active={panelOpen && panelTab === "net"} entries={netEntries} setEntries={setNetEntries} />
               </div>
               <div className="panel-body" hidden={panelTab !== "logs"}>
-                {target ? <LogsPane key={target} app={target} active={panelOpen && panelTab === "logs"} /> : <div className="term-overlay">برنامه‌ای انتخاب نشده است.</div>}
+                {target.startsWith("vm:") ? (
+                  <div className="term-overlay">API لیارا لاگ ماشین مجازی را نمی‌دهد. در کنسول همین ماشین <code className="ltr">journalctl -n 200</code> بزنید، یا از یارا بخواهید بررسی کند.</div>
+                ) : target ? (
+                  <LogsPane key={target} app={target} active={panelOpen && panelTab === "logs"} />
+                ) : (
+                  <div className="term-overlay">برنامه‌ای انتخاب نشده است.</div>
+                )}
               </div>
             </section>
           )}

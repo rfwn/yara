@@ -47,6 +47,7 @@ function CopyValue({ value }: { value: string }) {
 /** The domain checklist: who does each step, what is done, and the exact records for the registrar. */
 export function DomainCard({ call }: { call: Call }) {
   const initial = ((call.output as any)?.result ?? call.output) as Guide;
+  const vm = typeof call.args.vm === "string" ? call.args.vm : null;
   const [g, setG] = useState<Guide>(initial);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -56,7 +57,7 @@ export function DomainCard({ call }: { call: Call }) {
     setBusy(true);
     setErr("");
     try {
-      const res = await fetch(`/api/domains/guide?domain=${encodeURIComponent(g.domain)}${g.app ? `&app=${encodeURIComponent(g.app)}` : ""}&recheck=1`);
+      const res = await fetch(`/api/domains/guide?domain=${encodeURIComponent(g.domain)}${vm ? `&vm=${encodeURIComponent(vm)}` : g.app ? `&app=${encodeURIComponent(g.app)}` : ""}&recheck=1`);
       const d = await res.json();
       if (!res.ok) throw new Error(d.error ?? "بررسی نشد.");
       setG(d);

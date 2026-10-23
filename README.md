@@ -121,11 +121,13 @@ server.mjs ─every 60 s─► POST /api/monitor/tick (in-process HMAC key)
   - Targets must resolve to public addresses only. The connection is pinned to the checked address, so private, loopback, link-local and cloud-metadata ranges cannot be reached (no SSRF or DNS rebinding).
   - Hard timeouts, size caps, no redirect following, 30 checks per minute per user, and every run is written to the audit log.
 - **Domain guide** (`domainGuide`): a checklist card for connecting a domain. It shows who does each step, what Liara reports, what public DNS answers right now, the exact NS or CNAME records with IRNIC how-to for `.ir`, and a re-check button. The registrar step has no API, and the card says so.
-- **SSH to VMs** (VM page). The browser opens a WebSocket to `server.mjs`, which uses ssh2 to reach the VM.
-  - The single-use ticket is minted only after Liara confirms the VM is the user's, and it fixes the VM's public IP.
-  - By default the server reads the VM's root password from Liara at connect time, so it never reaches the browser, the database or the agents. Manual password or key login is the fallback.
-  - Host keys are trusted on first use and pinned; a changed key is refused before any credential is sent.
-  - Sessions end after 15 minutes idle or 2 hours, and connect and disconnect are audited.
+- **SSH to VMs**: in the Console tab (choose a VM in the target list) and for the agents.
+  - **Console tab.** The browser opens a WebSocket to `server.mjs`, which uses ssh2 to reach the VM. The single-use ticket is minted only after Liara confirms the VM is the user's, and it fixes the VM's public IP.
+  - **Agents (`runVmCommand`).** The agents run commands as root over SSH from the Next server. Read-only commands (status, logs, `nginx -t`, `certbot certificates`…) run immediately. Changes need approval, and destructive commands need the VM name typed. Output streams into the chat card and into the VM's Console tab, marked `[yara]`. "Get SSL on my VM" becomes: domainGuide with `vm` (A record → VM IP, port 80, certificate) → nginx check → certbot after approval → a real TLS check.
+  - **Credentials.** Both paths read the VM's root password from Liara at connect time, so it never reaches the browser, the database or the model. Manual password login in the Console tab is the fallback for key-only VMs.
+  - **Host keys.** Trusted on first use and pinned per user and VM, shared by both paths. A changed key is refused before any password is sent.
+  - **Limits.** Interactive sessions end after 15 minutes idle or 2 hours. Every session and command is audited.
+  - **Build.** `ssh2` is in `serverExternalPackages` (next.config.ts) because its optional native binding cannot be bundled.
 
 ### Virtual machines
 

@@ -7,9 +7,9 @@ export const PLATFORM_LIMITS: Limit[] = [
   {
     id: "vm-insight",
     area: "ماشین مجازی",
-    title: "مصرف CPU و RAM، لاگ و اجرای دستور داخل ماشین",
-    detail: "VM API only exposes state, power, plan, disks, network traffic and operation history. No CPU/RAM usage, no logs, no exec inside the VM.",
-    workaround: "Open the SSH terminal on the VM page (Yara reads the root password from Liara at connect time) and run top, free -h, df -h or journalctl there, or run the Yara runner on the VM.",
+    title: "مصرف CPU و RAM و لاگ داخل ماشین",
+    detail: "VM API only exposes state, power, plan, disks, network traffic and operation history. No CPU/RAM usage and no logs; no exec API either.",
+    workaround: "Yara logs in over SSH with the root password Liara holds (runVmCommand) and reads top, free -h, df -h or journalctl itself; the user sees it in the VM's Console tab. VMs created with SSH keys only (no root password in Liara) need the user to connect manually.",
   },
   {
     id: "vm-traffic-window",

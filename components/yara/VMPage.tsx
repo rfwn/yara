@@ -3,7 +3,6 @@
 import { Bot, Info, Power, RefreshCw, RotateCw, Server } from "lucide-react";
 import { faDigits, relativeFa } from "@/lib/fa";
 import { Skeleton, useDetail } from "./ResourcePages";
-import { VmSsh } from "./VmSsh";
 import { useWorkbench } from "./Workbench";
 
 type VMDetail = {
@@ -141,8 +140,8 @@ export function VMPage({ id }: { id: string }) {
           <aside className="api-limit" role="note">
             <Info size={15} aria-hidden />
             <p>
-              API لیارا برای ماشین مجازی <b>مصرف پردازنده و حافظه، لاگ‌ها و اجرای دستور داخل ماشین</b> را ارائه نمی‌دهد؛ یارا فقط وضعیت، دیسک‌ها، ترافیک شبکه و تاریخچه‌ی عملیات را می‌بیند. برای بررسی داخل ماشین، رانر یارا را روی آن اجرا
-              کنید (تنظیمات ← کد و فضاهای کاری) یا دستورهایی را که یارا پیشنهاد می‌دهد خودتان با SSH اجرا کنید.
+              API لیارا برای ماشین مجازی <b>مصرف پردازنده و حافظه و لاگ‌ها</b> را نمی‌دهد. یارا برای دیدن داخل ماشین با SSH وارد می‌شود (رمز root را از لیارا می‌گیرد): بررسی‌ها خودکار اجرا می‌شوند و هر تغییری پیش از اجرا تأیید شما را
+              می‌خواهد. همه‌ی دستورها در کنسول همین ماشین دیده می‌شوند.
             </p>
           </aside>
 
@@ -213,7 +212,22 @@ export function VMPage({ id }: { id: string }) {
             </div>
           </section>
 
-          <VmSsh vm={d.id ?? id} on={on} />
+          <section className="box">
+            <h2>ترمینال SSH</h2>
+            <div className="body vm-ssh-cta">
+              <p className="small muted">
+                ترمینال این ماشین در کنسول پایین باز می‌شود. یارا رمز root را خودش از لیارا می‌گیرد (به مرورگر نمی‌آید) و دستورهایی که عامل‌ها روی این ماشین اجرا می‌کنند هم همان‌جا دیده می‌شود.
+              </p>
+              <span className="toolbar">
+                <button type="button" className="btn btn-primary" disabled={!on} onClick={() => wb.openVmConsole(name)}>
+                  باز کردن ترمینال
+                </button>
+                <button type="button" className="btn" onClick={() => wb.askYara(`روی ماشین ${name} وضعیت سرویس‌ها، فضای دیسک و حافظه را بررسی کن.`)}>
+                  بررسی داخل ماشین با یارا
+                </button>
+              </span>
+            </div>
+          </section>
 
           <section className="box">
             <h2>تاریخچه‌ی عملیات</h2>

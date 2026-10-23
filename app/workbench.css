@@ -1796,3 +1796,15 @@ button.link { padding: 0; border: 0; background: none; font: inherit; cursor: po
 .gen-card.netcheck[data-state="failed"] pre { color: #ff8a90; }
 .ssh-quick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ssh-quick .link { margin-inline-start: auto; }
+
+/* ---------- VM console (terminal surface: stays dark) ---------- */
+.vm-console { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #141518; }
+.vm-console-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 10px; border-bottom: 1px solid #2b2d31; color: #c9ccd2; }
+.vm-console-bar .spacer { flex: 1; }
+.vm-console-msg { font-size: 12px; color: #ff8a90; }
+.vm-console-manual { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid #2b2d31; }
+.vm-console-manual .input { width: 160px; height: 28px; }
+.vm-console-fp { padding: 2px 10px; font: 11px var(--mono); color: #7d828c; }
+.vm-console-term { flex: 1; min-height: 0; padding: 6px 8px; }
+.vm-ssh-cta { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.vm-ssh-cta p { margin: 0; max-width: 72ch; }

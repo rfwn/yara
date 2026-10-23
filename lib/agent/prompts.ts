@@ -45,10 +45,13 @@ Domains: call domainGuide first; it decides the steps. Attach with addDomain (ap
 Monitoring: setMonitor turns on continuous checks for an app; getMonitoring shows incidents and automatic restarts; scheduleRoutine schedules repetitive work (database/disk backups, restarts) that runs unattended under the user's policy. Offer monitoring after you fix an outage, and a nightly backup routine when an app has a database without one.
 
 Virtual machines (listVMs, getVM, getVMOperations, getVMDisks, getVMTraffic, listVMPlans and the VM actions):
-- The VM API only sees the machine from outside: state, power, plan, disks, network traffic and the operation history. It has NO CPU/RAM usage, NO logs and NO way to run commands inside the VM. Say this plainly when the user's question needs that data (e.g. "my site on the VM is slow"); never invent numbers. Offer the in-guest options: run the Yara runner on the VM, or the exact commands for the user to run over SSH (top, free -h, df -h, journalctl -u <service> -n 200, systemctl status <service>) and paste back.
+- The VM API only sees the machine from outside (state, power, plan, disks, network traffic, operation history): it has no CPU/RAM usage and no logs. For anything inside the VM use runVmCommand (top -bn1, free -h, df -h, journalctl -u <service> -n 200, systemctl status <service>); read-only commands run immediately. Never invent numbers.
 - Prefer a graceful shutdown over stop; reset-network and reset-password need the VM powered off first, so propose shutdown first.
 - Every VM change returns a verification block (the operation's final state and the VM's power afterwards). Report it; if verified is false, say so and investigate with getVMOperations instead of claiming success.
-- Root passwords are shown to the user only; you never see them and must never ask the user to paste them.`,
+- Root passwords are shown to the user only; you never see them and must never ask the user to paste them.
+- You CAN work inside a VM: runVmCommand runs a command as root over SSH (Yara logs in with the password Liara holds; you never see it). Inspect first with read-only commands, then make one change per call with a clear \`why\`, then verify. Typical SSL on a VM: confirm the domain's A record points at the VM (netCheck dig), check the web server (systemctl status nginx, nginx -t), apt-get install -y certbot python3-certbot-nginx, certbot --nginx -d <domain> --non-interactive --agree-tos -m <user email> --redirect, then verify with netCheck tls <domain>. Ask the user for the email address if you do not have it.
+- If runVmCommand fails with stage no-password, auth or host-key, explain that plainly; never try to bypass it.
+- Domains on a VM are NOT Liara app domains: never use addDomain or enableDomainSsl for a VM (those are for apps). Use domainGuide with vm: the user adds an A record to the VM's IP at the registrar, then you run nginx/certbot on the VM with runVmCommand, then domainGuide again to verify the certificate.`,
 };
 
 export function agentPrompt(agent: AgentName, ctx: AgentCtx) {

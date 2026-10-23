@@ -8,7 +8,7 @@ export async function GET(req: Request) {
   if (auth instanceof Response) return auth;
   const q = new URL(req.url).searchParams;
   try {
-    return Response.json(await domainGuide(createLiaraClient(auth.creds), q.get("domain") ?? "", { app: q.get("app") ?? undefined, recheck: q.get("recheck") === "1" }));
+    return Response.json(await domainGuide(createLiaraClient(auth.creds), q.get("domain") ?? "", { app: q.get("app") ?? undefined, vm: q.get("vm") ?? undefined, recheck: q.get("recheck") === "1" }));
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 });
   }
