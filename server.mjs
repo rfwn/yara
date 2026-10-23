@@ -56,7 +56,9 @@ function redeemTicket(ticket) {
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 });
 
 wss.on("connection", (client, _req, session) => {
-  const url = `${LIARA_EXEC}?token=${encodeURIComponent(session.token)}&cmd=${encodeURIComponent("/bin/bash")}&project_id=${encodeURIComponent(session.app)}&teamID=${encodeURIComponent(session.team)}`;
+  // Liara's app images consistently provide POSIX sh; bash is optional and a
+  // missing binary makes the exec service close the WebSocket immediately.
+  const url = `${LIARA_EXEC}?token=${encodeURIComponent(session.token)}&cmd=${encodeURIComponent("/bin/sh")}&project_id=${encodeURIComponent(session.app)}&teamID=${encodeURIComponent(session.team)}`;
   const upstream = new WebSocket(url);
   const pending = [];
 
@@ -71,7 +73,12 @@ wss.on("connection", (client, _req, session) => {
     client.close(4000, reason);
   });
   upstream.on("error", () => client.readyState === WebSocket.OPEN && client.close(4001, "upstream-error"));
-  upstream.on("close", () => client.readyState === WebSocket.OPEN && client.close(1000, "closed"));
+  upstream.on("close", (code, reason) => {
+    if (client.readyState !== WebSocket.OPEN) return;
+    const detail = reason.toString().slice(0, 100);
+    console.warn(`[shell] upstream closed (${code})${detail ? `: ${detail}` : ""}`);
+    client.close(1000, detail || "closed");
+  });
 
   client.on("message", (data) => {
     const text = data.toString();
