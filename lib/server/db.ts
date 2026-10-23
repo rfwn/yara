@@ -43,7 +43,11 @@ CREATE TABLE IF NOT EXISTS shell_tickets (
 );
 `;
 
-const globalForDb = globalThis as unknown as { yaraDb?: Database.Database };
+const globalForDb = globalThis as unknown as { yaraDb?: Database.Database; yaraDbSchema?: string };
+
+// Bump when migrate() changes. The connection is cached on globalThis and survives hot reloads,
+// so without this a running dev server keeps the old schema until it is restarted.
+const SCHEMA_VERSION = "2026-10-23.ssh";
 
 export function db(): Database.Database {
   if (!globalForDb.yaraDb) {
@@ -52,9 +56,12 @@ export function db(): Database.Database {
     conn.pragma("journal_mode = WAL");
     conn.pragma("foreign_keys = ON");
     conn.pragma("busy_timeout = 5000");
-    conn.exec(SCHEMA);
-    migrate(conn);
     globalForDb.yaraDb = conn;
+  }
+  if (globalForDb.yaraDbSchema !== SCHEMA_VERSION) {
+    globalForDb.yaraDb.exec(SCHEMA);
+    migrate(globalForDb.yaraDb);
+    globalForDb.yaraDbSchema = SCHEMA_VERSION;
   }
   return globalForDb.yaraDb;
 }

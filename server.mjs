@@ -173,6 +173,11 @@ async function vmCredsFromLiara(s) {
 
 function redeemSshTicket(ticket) {
   db ??= new Database(DB_PATH);
+  // Same definitions as lib/server/db.ts, in case this process meets an older database first.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ssh_tickets (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, vm_id TEXT NOT NULL, vm_name TEXT NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS vm_host_keys (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, vm_id TEXT NOT NULL, fingerprint TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (user_id, vm_id));
+  `);
   const row = db.prepare("SELECT * FROM ssh_tickets WHERE id = ? AND expires_at > ?").get(ticket, Date.now());
   db.prepare("DELETE FROM ssh_tickets WHERE id = ? OR expires_at < ?").run(ticket, Date.now());
   return row ?? null;
