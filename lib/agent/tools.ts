@@ -6,6 +6,7 @@ import { actions } from "../actions";
 import { createLiaraClient, enc, type Project } from "../liara";
 import { appUrl } from "../monitor/evidence";
 import { probeUrl } from "../monitor/probe";
+import { domainGuide } from "../server/domains";
 import { checkApp, createRoutine, INTERVALS, listIncidents, listMonitors, listRoutines, upsertMonitor, uptime } from "../server/monitor";
 import { getPolicy } from "./policy";
 import { buildLogs, deployWorkspace } from "../server/deploy";
@@ -503,6 +504,15 @@ const scheduleRoutine = defineTool({
   }),
 });
 
+const domainGuideTool = defineTool({
+  name: "domainGuide",
+  description:
+    "Guided custom-domain setup, step by step: whether the domain is attached in Liara, what public DNS answers right now (live lookup), the exact records the user must enter at the registrar (IRNIC for .ir, with how-to), Liara verification and SSL. Shown to the user as a checklist card with a re-check button. Call it first for any domain request, after each step you take (addDomain, enableDomainSsl), and with recheck: true when the user says they changed DNS.",
+  schema: z.object({ domain: z.string().min(3), app: z.string().optional(), recheck: z.boolean().optional() }),
+  kind: "read",
+  run: (a, ctx) => domainGuide(ctx.liara, a.domain, { app: a.app ?? ctx.app, recheck: a.recheck }),
+});
+
 // ---------- per-agent tool sets ----------
 
 const ws = (names: string[]) => workspaceTools.filter((t) => names.includes(t.name));
@@ -511,6 +521,7 @@ export const AGENT_TOOLS = {
   supervisor: [updatePlan, getPlatformLimits, recommendAppPlanTool, getMonitoring, ...ws(["listWorkspaces"]), ...pick(liaraReadTools, ["listApps", "listVMs", "getAccountOverview"])],
   deploy: [
     probeApp,
+    domainGuideTool,
     setMonitor,
     ...ws(["listWorkspaces", "listFiles", "readFile", "searchCode", "detectProject", "runCommand", "writeFile", "editFile", "gitChanges"]),
     ...deployTools,
@@ -535,6 +546,7 @@ export const AGENT_TOOLS = {
     ...Object.values(liaraReadTools),
     ...Object.values(liaraActionTools).filter((t) => t.name !== "deployRelease"),
     probeApp,
+    domainGuideTool,
     getMonitoring,
     setMonitor,
     scheduleRoutine,

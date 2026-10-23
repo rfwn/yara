@@ -11,6 +11,7 @@ import { fixRequest } from "../Health";
 import { LogoMark } from "../Logo";
 import { useWorkbench } from "../Workbench";
 import { AGENTS, AgentChip, ApprovalCard, BlockedCard, CommandCard, DeployCard, DiagnosisCard, EditCard, PlanCard, ProbeCard } from "./Cards";
+import { DomainCard } from "./DomainCard";
 import { fromEvents, pendingCall, readEvents, reduce, type AgentEvent, type AgentId, type Call, type Item, type Timeline } from "./timeline";
 
 type Suggestion = { icon: LucideIcon; text: string; context?: string; urgent?: boolean };
@@ -497,6 +498,11 @@ function renderItems(tl: Timeline, decide: (approved: boolean, confirmText?: str
       if (c.done && !c.error && c.name === "diagnoseApp" && (c.output as any)?.health) {
         flushReads();
         group.push(<DiagnosisCard key={c.id} call={c} />);
+        continue;
+      }
+      if (c.done && !c.error && c.name === "domainGuide" && (c.output as any)?.steps) {
+        flushReads();
+        group.push(<DomainCard key={c.id} call={c} />);
         continue;
       }
       if (c.done && !c.error && c.name === "probeApp" && (c.output as any)?.samples) {
