@@ -8,6 +8,7 @@ import {
   Gauge,
   Globe,
   Lightbulb,
+  Network,
   RotateCcw,
   Stethoscope,
   Bug,
@@ -32,6 +33,7 @@ import { useEffect, useRef, useState } from "react";
 import { bytesFa, faDigits } from "@/lib/fa";
 import { Markdown } from "../../Markdown";
 import { CauseList, HealthPill, type HealthStatus } from "../Health";
+import { useWorkbench } from "../Workbench";
 import { useModKey } from "../useModKey";
 import type { AgentId, Call } from "./timeline";
 
@@ -662,6 +664,28 @@ export function ProbeCard({ call }: { call: Call }) {
       <p className="ltr small faint probe-url" dir="ltr">
         {o.url}
       </p>
+    </section>
+  );
+}
+
+/** A network check Yara ran (netCheck): the command, its output, and a jump to the Network tab where it also landed. */
+export function NetCard({ call }: { call: Call }) {
+  const wb = useWorkbench();
+  const o = (unwrap(call.output) ?? {}) as { command?: string; ok?: boolean; output?: string; error?: string };
+  return (
+    <section className="gen-card netcheck" data-state={o.ok ? "ok" : "failed"} aria-label={`بررسی شبکه: ${o.command ?? ""}`}>
+      <header className="gen-head">
+        <Network size={14} aria-hidden />
+        <span className="gen-title ltr" dir="ltr">
+          {o.command}
+        </span>
+        <button type="button" className="btn btn-ghost" style={{ height: 24, marginInlineStart: "auto" }} onClick={wb.openNet}>
+          تب شبکه
+        </button>
+      </header>
+      <pre className="ltr" dir="ltr">
+        {o.output ?? o.error}
+      </pre>
     </section>
   );
 }

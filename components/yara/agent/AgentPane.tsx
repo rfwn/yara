@@ -10,7 +10,7 @@ import { Steps, type ToolPartLike } from "../Evidence";
 import { fixRequest } from "../Health";
 import { LogoMark } from "../Logo";
 import { useWorkbench } from "../Workbench";
-import { AGENTS, AgentChip, ApprovalCard, BlockedCard, CommandCard, DeployCard, DiagnosisCard, EditCard, PlanCard, ProbeCard } from "./Cards";
+import { AGENTS, AgentChip, ApprovalCard, BlockedCard, CommandCard, DeployCard, DiagnosisCard, EditCard, NetCard, PlanCard, ProbeCard } from "./Cards";
 import { DomainCard } from "./DomainCard";
 import { fromEvents, pendingCall, readEvents, reduce, type AgentEvent, type AgentId, type Call, type Item, type Timeline } from "./timeline";
 
@@ -151,6 +151,11 @@ export function AgentPane({
         for await (const ev of readEvents(res)) {
           if (ev.t === "done") break;
           if (ev.t === "result" && (ev.output as any)?.ok) wrote = true;
+          // Yara's network checks also land in the Network tab, in view, like its console commands.
+          if (ev.t === "result" && ev.name === "netCheck" && (ev.output as any)?.command) {
+            const o = ev.output as { command: string; ok: boolean; output: string };
+            wb.showNet({ command: o.command, ok: o.ok, output: o.output });
+          }
           setTl((t) => reduce(t, ev));
         }
       } catch (e) {
@@ -503,6 +508,11 @@ function renderItems(tl: Timeline, decide: (approved: boolean, confirmText?: str
       if (c.done && !c.error && c.name === "domainGuide" && (c.output as any)?.steps) {
         flushReads();
         group.push(<DomainCard key={c.id} call={c} />);
+        continue;
+      }
+      if (c.done && c.name === "netCheck" && (c.output as any)?.command) {
+        flushReads();
+        group.push(<NetCard key={c.id} call={c} />);
         continue;
       }
       if (c.done && !c.error && c.name === "probeApp" && (c.output as any)?.samples) {

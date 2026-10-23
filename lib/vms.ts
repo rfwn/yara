@@ -54,6 +54,16 @@ export async function vmDetails(c: LiaraClient, ref: string) {
   };
 }
 
+/** Where to SSH: the VM's own public IPv4 and SSH port, straight from Liara (never from the browser). */
+export async function vmSshTarget(c: LiaraClient, ref: string) {
+  const vm = await resolveVM(c, ref);
+  const d = await c.iaas.get<VMDetails>(`/vm/${enc(vm._id)}`);
+  const host = (d.IPs ?? []).find((ip) => /4/.test(ip.version) || /^d+.d+.d+.d+$/.test(ip.address))?.address;
+  const port = Number(d.config?.sshPort) || 22;
+  // Only whether Liara holds a root password; the value itself is read by the SSH proxy at connect time.
+  return { id: vm._id, name: vm.name, host: host ?? null, port, on: d.power === "POWERED_ON", liaraPassword: !!d.config?.rootPassword };
+}
+
 export async function vmOperations(c: LiaraClient, id: string) {
   const { operations } = await c.iaas.get<{ operations: VMOperation[] }>(`/vm/operation/${enc(id)}`);
   return [...(operations ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt));

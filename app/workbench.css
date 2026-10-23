@@ -1762,3 +1762,37 @@ button.link { padding: 0; border: 0; background: none; font: inherit; cursor: po
 .mono-cell { font-family: var(--mono); font-size: 12px; }
 .dom-howto { margin: 6px 0; padding-inline-start: 18px; display: grid; gap: 4px; }
 .dom-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- network panel (terminal surface: stays dark) ---------- */
+.net-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--term-bg, #141518); color: #d9dce1; font-family: var(--mono); font-size: 12.5px; }
+.net-out { flex: 1; min-height: 0; overflow: auto; padding: 10px 14px; }
+.net-intro { display: grid; gap: 10px; font-family: var(--font); font-size: 12.5px; color: #9da2ab; }
+.net-intro p { margin: 0; display: flex; gap: 6px; align-items: baseline; line-height: 1.8; }
+.net-intro code { color: #d9dce1; }
+.net-examples { display: flex; flex-wrap: wrap; gap: 6px; }
+.net-examples button { height: 26px; padding: 0 10px; border: 1px solid #2b2d31; border-radius: var(--r-sm); background: #1b1c20; color: #c9ccd2; font-family: var(--mono); font-size: 12px; cursor: pointer; }
+.net-examples button:hover { border-color: #3a3d43; color: #fff; }
+.net-entry + .net-entry { margin-top: 12px; }
+.net-cmd { color: #fff; }
+.net-prompt { color: #4f8bff; margin-inline-end: 6px; user-select: none; }
+.net-entry pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; color: #c9ccd2; font: inherit; }
+.net-entry[data-ok="false"] pre { color: #ff8a90; }
+.net-input { display: flex; align-items: center; gap: 0; padding: 6px 14px; border-top: 1px solid #2b2d31; }
+.net-input input { flex: 1; min-width: 0; height: 28px; border: 0; outline: 0; background: transparent; color: #fff; font: inherit; }
+
+/* ---------- VM SSH ---------- */
+.ssh-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.ssh-form label { display: grid; gap: 4px; }
+.ssh-form .input { width: 180px; }
+.ssh-form .ssh-key { flex: 1 1 100%; }
+.ssh-form .ssh-key .input { width: 100%; height: auto; padding-block: 8px; font-family: var(--mono); font-size: 12px; }
+.ssh-note { display: flex; gap: 6px; align-items: baseline; margin: 0; line-height: 1.8; }
+.ssh-term { height: 360px; padding: 8px; border-radius: var(--r); background: #141518; overflow: hidden; }
+.ssh-term[hidden] { display: none; }
+
+.net-by { margin-inline-start: 10px; font-family: var(--font); font-size: 11px; color: #4f8bff; }
+.net-entry[data-by="yara"] .net-prompt { color: #3fbf86; }
+.gen-card.netcheck pre { margin: 0; max-height: 180px; overflow: auto; padding: 8px 10px; border-radius: var(--r-sm); background: #141518; color: #c9ccd2; font: 12px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.gen-card.netcheck[data-state="failed"] pre { color: #ff8a90; }
+.ssh-quick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ssh-quick .link { margin-inline-start: auto; }

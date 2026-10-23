@@ -114,6 +114,19 @@ server.mjs ─every 60 s─► POST /api/monitor/tick (in-process HMAC key)
 - **Verification after every agent change.** `restartApp`, env, plan, power, feature and deploy changes made in chat re-probe the app before the result reaches the model. The approval card shows "result checked" with the HTTP status and latency, or "result not confirmed".
 - **Routines.** Database backups, disk backups and app restarts can run daily or weekly at a set hour, Tehran time. Creating one is a standing authorisation. Each run is still checked against the policy (it can be paused globally) and recorded in the audit log.
 
+### Network tools and VM SSH
+
+- **Network tab** (bottom panel) and the agents' `netCheck` tool share one command line: `dig`, `http`, `tls`, `port`, `whois`. Yara's own runs appear there too, marked as Yara's.
+  - It is not a shell: each verb is implemented with Node's dns/net/tls/http modules, so there is nothing to inject into and nothing else can run.
+  - Targets must resolve to public addresses only. The connection is pinned to the checked address, so private, loopback, link-local and cloud-metadata ranges cannot be reached (no SSRF or DNS rebinding).
+  - Hard timeouts, size caps, no redirect following, 30 checks per minute per user, and every run is written to the audit log.
+- **Domain guide** (`domainGuide`): a checklist card for connecting a domain. It shows who does each step, what Liara reports, what public DNS answers right now, the exact NS or CNAME records with IRNIC how-to for `.ir`, and a re-check button. The registrar step has no API, and the card says so.
+- **SSH to VMs** (VM page). The browser opens a WebSocket to `server.mjs`, which uses ssh2 to reach the VM.
+  - The single-use ticket is minted only after Liara confirms the VM is the user's, and it fixes the VM's public IP.
+  - By default the server reads the VM's root password from Liara at connect time, so it never reaches the browser, the database or the agents. Manual password or key login is the fallback.
+  - Host keys are trusted on first use and pinned; a changed key is refused before any credential is sent.
+  - Sessions end after 15 minutes idle or 2 hours, and connect and disconnect are audited.
+
 ### Virtual machines
 
 VMs use a separate service, `iaas-api.liara.ir` (spec: `spec/Iaas.yaml` in liara-cloud/openapi). Some behavior isn't in the spec. It comes from the CLI and from calls to the real API:

@@ -13,6 +13,7 @@ export const TOOL_LABELS: Record<string, (i: In) => string> = {
   getAppMetrics: (i) => `مصرف منابع ${i.app} · ${i.hours ?? 6} ساعت اخیر`,
   diagnoseApp: (i) => `معاینه‌ی کامل ${i.app}`,
   domainGuide: (i) => `راهنمای دامنه‌ی ${i.domain}${i.recheck ? " · بررسی دوباره" : ""}`,
+  netCheck: (i) => `بررسی شبکه: ${i.command}`,
   probeApp: (i) => `درخواست به سایت ${i.app}${i.path ? ` · ${i.path}` : ""}`,
   getMonitoring: (i) => (i.app ? `وضعیت پایش ${i.app}` : "وضعیت پایش و حادثه‌ها"),
   listDomains: (i) => (i.app ? `دامنه‌های ${i.app}` : "فهرست دامنه‌ها"),

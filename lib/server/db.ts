@@ -175,4 +175,23 @@ function migrate(conn: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS routines_due ON routines(enabled, next_run_at);
   `);
+  // VM SSH: single-use tickets (the browser never names the host) and trust-on-first-use host keys.
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS ssh_tickets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      vm_id TEXT NOT NULL,
+      vm_name TEXT NOT NULL,
+      host TEXT NOT NULL,
+      port INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS vm_host_keys (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      vm_id TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, vm_id)
+    );
+  `);
 }

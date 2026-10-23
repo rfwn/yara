@@ -6,7 +6,9 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
+import net from "node:net";
 import next from "next";
+import { Client as SshClient } from "ssh2";
 import { WebSocket, WebSocketServer } from "ws";
 
 const port = Number(process.env.PORT || 3001);
@@ -142,6 +144,167 @@ runnerWss.on("connection", (ws, _req, userId) => {
   });
 });
 
+// ---- VM SSH (browser terminal → this proxy → the user's own VM) ----
+// The ticket (minted by /api/vms/[id]/ssh after checking the VM belongs to the user) fixes the host;
+// credentials arrive once over the socket, go straight to ssh2 and are never stored or logged.
+// Host keys are trusted on first use and pinned per user+VM; a changed key is refused.
+const sshWss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
+const SSH_IDLE_MS = 15 * 60_000;
+const SSH_MAX_MS = 2 * 60 * 60_000;
+const isPrivateV4 = (ip) => {
+  const [a, b] = ip.split(".").map(Number);
+  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+};
+
+const IAAS_BASE = process.env.LIARA_IAAS_BASE || "https://iaas-api.liara.ir";
+
+/** The VM's root password from Liara's IaaS API, only if the VM still has the address the ticket was minted for. */
+async function vmCredsFromLiara(s) {
+  const u = db.prepare("SELECT liara_token_enc AS token, team_id AS team FROM users WHERE id = ?").get(s.user_id);
+  if (!u?.token) return null;
+  const url = new URL(`/vm/${encodeURIComponent(s.vm_id)}`, IAAS_BASE);
+  if (u.team) url.searchParams.set("teamID", u.team);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${decrypt(u.token)}` }, signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) throw new Error(`Liara IaaS ${res.status}`);
+  const d = await res.json();
+  if (!(d.IPs ?? []).some((ip) => ip.address === s.host)) throw new Error("VM address changed since the ticket was minted");
+  return typeof d.config?.rootPassword === "string" && d.config.rootPassword ? d.config.rootPassword : null;
+}
+
+function redeemSshTicket(ticket) {
+  db ??= new Database(DB_PATH);
+  const row = db.prepare("SELECT * FROM ssh_tickets WHERE id = ? AND expires_at > ?").get(ticket, Date.now());
+  db.prepare("DELETE FROM ssh_tickets WHERE id = ? OR expires_at < ?").run(ticket, Date.now());
+  return row ?? null;
+}
+
+/** Same row shape as lib/server/audit.ts, so SSH sessions show up in the audit log beside everything else. */
+function sshAudit(s, status, extra) {
+  try {
+    const id = `ch_${crypto.randomBytes(6).toString("hex")}`;
+    const now = Date.now();
+    const args = JSON.stringify({ vm: s.vm_name, host: s.host, port: s.port, user: extra.user });
+    db.prepare(
+      `INSERT INTO audit_log (id, user_id, thread_id, agent, tool, title, target, risk, args_json, args_hash, decision, reason, status, result_json, created_at, finished_at)
+       VALUES (?, ?, 'ssh', 'user', 'vmSsh', 'نشست SSH به ماشین مجازی', ?, 'medium', ?, ?, 'approved', 'Opened by the user from the VM page; credentials are never stored.', ?, ?, ?, ?)`,
+    ).run(id, s.user_id, s.vm_name, args, crypto.createHash("sha256").update(args + now).digest("hex").slice(0, 24), status, JSON.stringify(extra), extra.startedAt ?? now, now);
+  } catch (e) {
+    console.error("[ssh] audit failed", e);
+  }
+}
+
+sshWss.on("connection", (ws, _req, s) => {
+  const send = (o) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(o));
+  const ssh = new SshClient();
+  let stream = null;
+  let idle;
+  let user = "";
+  let credsFrom = "manual";
+  const startedAt = Date.now();
+  const bump = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => {
+      send({ t: "status", state: "closed", reason: "idle" });
+      ws.close(4000, "idle");
+    }, SSH_IDLE_MS);
+  };
+  const hardStop = setTimeout(() => ws.close(4000, "max-duration"), SSH_MAX_MS);
+  let audited = false;
+  const finish = (status, reason) => {
+    if (audited || !user) return;
+    audited = true;
+    sshAudit(s, status, { user, reason, startedAt, credentials: credsFrom, minutes: Math.round((Date.now() - startedAt) / 60000) });
+  };
+
+  ws.once("message", async (raw) => {
+    let auth;
+    try {
+      auth = JSON.parse(raw.toString());
+    } catch {}
+    const fromLiara = auth?.mode === "liara";
+    if (auth?.t !== "auth" || (!fromLiara && (!/^[a-z_][a-z0-9_-]{0,31}$/.test(auth.username ?? "") || (!auth.password && !auth.privateKey)))) return ws.close(4400, "bad-auth-message");
+    if (!net.isIPv4(s.host) || (isPrivateV4(s.host) && process.env.SSH_ALLOW_PRIVATE !== "1")) return ws.close(4403, "bad-host");
+    send({ t: "status", state: "connecting", host: s.host, port: s.port });
+    if (fromLiara) {
+      // The VM's root password, read from Liara with the user's own token at the moment of connecting.
+      // It goes from Liara to ssh2 inside this process: never to the browser, the database or the agents.
+      try {
+        const c = vmCredsFromLiara(s);
+        const creds = await c;
+        if (!creds) return ws.close(4404, "no-liara-password");
+        auth = { ...auth, username: "root", password: creds };
+        credsFrom = "liara";
+      } catch (e) {
+        console.error("[ssh] liara credentials:", e instanceof Error ? e.message : e);
+        return ws.close(4502, "liara-unreachable");
+      }
+    }
+    user = auth.username;
+
+    ssh
+      .on("ready", () => {
+        ssh.shell({ term: "xterm-256color", cols: Math.min(auth.cols || 100, 400), rows: Math.min(auth.rows || 30, 200) }, (err, st) => {
+          if (err) return ws.close(4001, "shell-failed");
+          stream = st;
+          send({ t: "status", state: "open" });
+          bump();
+          st.on("data", (d) => send({ t: "data", d: d.toString("utf8") }));
+          st.stderr?.on("data", (d) => send({ t: "data", d: d.toString("utf8") }));
+          st.on("close", () => ws.close(1000, "closed"));
+        });
+      })
+      .on("error", (e) => {
+        const reason = /authentication/i.test(e.message) ? "auth-failed" : e.level === "client-timeout" ? "timeout" : /host key|host denied|verification failed/i.test(e.message) ? "host-key-changed" : "ssh-error";
+        finish("error", reason);
+        send({ t: "status", state: "error", reason, detail: reason === "ssh-error" ? e.message.slice(0, 200) : undefined });
+        ws.close(4002, reason);
+      })
+      .connect({
+        host: s.host,
+        port: s.port,
+        username: auth.username,
+        password: auth.password || undefined,
+        privateKey: auth.privateKey || undefined,
+        passphrase: auth.passphrase || undefined,
+        readyTimeout: 15_000,
+        keepaliveInterval: 20_000,
+        hostVerifier: (key) => {
+          const fp = `SHA256:${crypto.createHash("sha256").update(key).digest("base64").replace(/=+$/, "")}`;
+          const known = db.prepare("SELECT fingerprint FROM vm_host_keys WHERE user_id = ? AND vm_id = ?").get(s.user_id, s.vm_id);
+          if (known && known.fingerprint !== fp) {
+            send({ t: "hostkey", fingerprint: fp, expected: known.fingerprint, changed: true });
+            return false;
+          }
+          if (!known) db.prepare("INSERT INTO vm_host_keys (user_id, vm_id, fingerprint, created_at) VALUES (?, ?, ?, ?)").run(s.user_id, s.vm_id, fp, Date.now());
+          send({ t: "hostkey", fingerprint: fp, firstTime: !known });
+          return true;
+        },
+      });
+    // Drop the credentials from this scope as soon as ssh2 has them.
+    auth.password = auth.privateKey = auth.passphrase = undefined;
+
+    ws.on("message", (m) => {
+      let msg;
+      try {
+        msg = JSON.parse(m.toString());
+      } catch {
+        return;
+      }
+      if (msg.t === "data" && stream && typeof msg.d === "string") {
+        stream.write(msg.d);
+        bump();
+      } else if (msg.t === "resize" && stream) stream.setWindow(Math.min(msg.rows || 30, 200), Math.min(msg.cols || 100, 400), 0, 0);
+    });
+  });
+
+  ws.on("close", () => {
+    clearTimeout(idle);
+    clearTimeout(hardStop);
+    finish("ok", "closed");
+    ssh.end();
+  });
+});
+
 const app = next({ dev, port });
 const handle = app.getRequestHandler();
 
@@ -150,7 +313,7 @@ await app.prepare();
 const server = createServer((req, res) => handle(req, res));
 
 // Next attaches its own "upgrade" listener on first request; keep it away from our socket paths.
-const isShell = (req) => (req.url ?? "").startsWith("/ws/shell") || (req.url ?? "").startsWith("/ws/runner");
+const isShell = (req) => /^\/ws\/(shell|runner|ssh)(\?|$)/.test(req.url ?? "");
 const on = server.on.bind(server);
 server.on = (event, listener) =>
   event === "upgrade" ? on(event, (req, socket, head) => (isShell(req) ? undefined : listener(req, socket, head))) : on(event, listener);
@@ -161,6 +324,11 @@ on("upgrade", (req, socket, head) => {
     const userId = runnerUser(new URL(req.url, "http://x").searchParams.get("token") ?? "");
     if (!userId) return socket.end("HTTP/1.1 401 Unauthorized\r\n\r\n");
     return runnerWss.handleUpgrade(req, socket, head, (ws) => runnerWss.emit("connection", ws, req, userId));
+  }
+  if (req.url.startsWith("/ws/ssh")) {
+    const s = redeemSshTicket(new URL(req.url, "http://x").searchParams.get("ticket") ?? "");
+    if (!s) return socket.end("HTTP/1.1 401 Unauthorized\r\n\r\n");
+    return sshWss.handleUpgrade(req, socket, head, (ws) => sshWss.emit("connection", ws, req, s));
   }
   try {
     const ticket = new URL(req.url, "http://x").searchParams.get("ticket") ?? "";

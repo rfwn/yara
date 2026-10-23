@@ -9,7 +9,7 @@ export const PLATFORM_LIMITS: Limit[] = [
     area: "ماشین مجازی",
     title: "مصرف CPU و RAM، لاگ و اجرای دستور داخل ماشین",
     detail: "VM API only exposes state, power, plan, disks, network traffic and operation history. No CPU/RAM usage, no logs, no exec inside the VM.",
-    workaround: "Run the Yara runner on the VM, or run the suggested commands (top, free -h, df -h, journalctl) over SSH and paste the output.",
+    workaround: "Open the SSH terminal on the VM page (Yara reads the root password from Liara at connect time) and run top, free -h, df -h or journalctl there, or run the Yara runner on the VM.",
   },
   {
     id: "vm-traffic-window",
@@ -23,7 +23,7 @@ export const PLATFORM_LIMITS: Limit[] = [
     area: "دامنه",
     title: "ثبت دامنه و تغییر NS در ثبت‌کننده (ایرنیک و…)",
     detail: "Registering a domain or changing its nameservers happens at the registrar (IRNIC for .ir, or the seller of the domain), outside Liara's API.",
-    workaround: "Yara adds the domain and DNS zone on Liara, gives the exact NS / CNAME / A values, the user sets them at the registrar, then Yara re-checks with checkDomain until it is verified.",
+    workaround: "domainGuide shows a checklist card: Yara attaches the domain, gives the exact NS / CNAME values with IRNIC how-to, the user sets them at the registrar, and «بررسی دوباره» re-verifies with a live DNS lookup and Liara's check before SSL is issued.",
   },
   {
     id: "billing",

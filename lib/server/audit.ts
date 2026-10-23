@@ -160,12 +160,19 @@ export function markRolledBack(id: string, by: string) {
 /** Changes that actually ran (or are running) in a time window: the basis for rate limits. */
 export function countChanges(where: { userId: string; threadId?: string; tool?: string; target?: string }, sinceMs: number) {
   // Auto-run safe commands (builds, tests) are audited but are not changes: a debug session runs many of them.
-  const parts = ["user_id = ?", "decision IN ('auto','approved')", "NOT (decision = 'auto' AND tool = 'runCommand')", "status != 'skipped'", "created_at >= ?"];
+  const parts = ["user_id = ?", "decision IN ('auto','approved')", "NOT (decision = 'auto' AND tool = 'runCommand')", "tool NOT LIKE 'net:%'", "tool != 'vmSsh'", "status != 'skipped'", "created_at >= ?"];
   const params: unknown[] = [where.userId, Date.now() - sinceMs];
   if (where.threadId) parts.push("thread_id = ?"), params.push(where.threadId);
   if (where.tool) parts.push("tool = ?"), params.push(where.tool);
   if (where.target) parts.push("target = ?"), params.push(where.target);
   return (db().prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE ${parts.join(" AND ")}`).get(...params) as { n: number }).n;
+}
+
+/** Network checks are reads, but they reach out to the internet from Yara's server: every one is on the record. */
+export function auditNet(userId: string, threadId: string | null, agent: string, r: { command: string; ok: boolean; output: string }) {
+  const verb = r.command.split(" ")[0];
+  const id = auditStart({ userId, threadId: threadId ?? "net", agent, tool: `net:${verb}`, title: "بررسی شبکه", target: r.command.slice(verb.length + 1, 120), risk: "low", args: { command: r.command }, decision: "auto", reason: "Read-only network check (public hosts only)." });
+  auditFinish(id, { status: r.ok ? "ok" : "error", result: { output: r.output.slice(0, 1500) } });
 }
 
 /** How often this exact call already failed in the thread recently. */

@@ -3,6 +3,7 @@
 import { Bot, Info, Power, RefreshCw, RotateCw, Server } from "lucide-react";
 import { faDigits, relativeFa } from "@/lib/fa";
 import { Skeleton, useDetail } from "./ResourcePages";
+import { VmSsh } from "./VmSsh";
 import { useWorkbench } from "./Workbench";
 
 type VMDetail = {
@@ -211,6 +212,8 @@ export function VMPage({ id }: { id: string }) {
               </table>
             </div>
           </section>
+
+          <VmSsh vm={d.id ?? id} on={on} />
 
           <section className="box">
             <h2>تاریخچه‌ی عملیات</h2>

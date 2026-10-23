@@ -21,6 +21,7 @@ import {
   SquareTerminal,
   Upload,
   Wifi,
+  Network,
   WifiOff,
   X,
 } from "lucide-react";
@@ -35,6 +36,7 @@ import { ConsolePane, type ConsoleController, type ConsoleRunResult } from "./Co
 import { DeployDialog, type UploadedSource } from "./DeployDialog";
 import { LogoMark } from "./Logo";
 import { LogsPane } from "./LogsPane";
+import { NetPane, type NetEntry } from "./NetPane";
 import { useModKey } from "./useModKey";
 
 export type AppSummary = { name: string; platform: string; status: string; on: boolean };
@@ -42,7 +44,7 @@ export type CaseSummary = { id: string; title: string; updatedAt: number; pendin
 type DbSummary = { id: string; name: string; type: string; status: string; on: boolean };
 type BucketSummary = { name: string; permission: string; status: string };
 type VMSummary = { id: string; name: string; power: string; state: string; os: string };
-type PanelTab = "console" | "logs";
+type PanelTab = "console" | "logs" | "net";
 export type Ask = { text: string; send: boolean; nonce: number; context?: string };
 export type OpenIncident = { id: string; app: string; title: string; severity: "critical" | "warning"; causes: Cause[]; openedAt: number; escalated: boolean };
 
@@ -64,6 +66,9 @@ type Ctx = {
   refreshCases: () => void;
   registerConsole: (app: string, c: ConsoleController) => () => void;
   runInConsole: (app: string, command: string) => Promise<ConsoleRunResult>;
+  /** Puts a network check Yara ran into the Network tab and shows it. */
+  showNet: (entry: Omit<NetEntry, "id" | "by">) => void;
+  openNet: () => void;
 };
 
 const WorkbenchCtx = createContext<Ctx | null>(null);
@@ -177,6 +182,7 @@ export function Workbench({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
   const [pending, setPending] = useState(0);
+  const [netEntries, setNetEntries] = useState<NetEntry[]>([]);
 
   const [chatId, setChatId] = useState("");
   const [chatMessages, setChatMessages] = useState<unknown[] | null>(null);
@@ -319,6 +325,19 @@ export function Workbench({
     return c.run(command);
   }, []);
 
+  const openNet = useCallback(() => {
+    setPanelMax(false);
+    setPanelOpen(true);
+    setPanelTab("net");
+  }, []);
+  const showNet = useCallback(
+    (entry: Omit<NetEntry, "id" | "by">) => {
+      setNetEntries((e) => [...e.slice(-99), { ...entry, id: Date.now() + Math.random(), by: "yara" }]);
+      openNet();
+    },
+    [openNet],
+  );
+
   const closeTab = (href: string) => {
     const next = tabs.filter((t) => t.href !== href);
     setTabs(next);
@@ -426,8 +445,10 @@ export function Workbench({
       refreshCases,
       registerConsole,
       runInConsole,
+      showNet,
+      openNet,
     }),
-    [apps, refreshApps, openApp, askYara, incidents, health, refreshHealth, openConsole, openLogs, openDeploy, refreshCases, registerConsole, runInConsole],
+    [apps, refreshApps, openApp, askYara, incidents, health, refreshHealth, openConsole, openLogs, openDeploy, refreshCases, registerConsole, runInConsole, showNet, openNet],
   );
 
   const TabIcon = ({ t }: { t: Tab }) =>
@@ -651,6 +672,7 @@ export function Workbench({
                   [
                     ["console", "کنسول", SquareTerminal],
                     ["logs", "لاگ‌ها", ScrollText],
+                    ["net", "شبکه", Network],
                   ] as const
                 ).map(([id, label, Icon]) => (
                   <button key={id} type="button" role="tab" className="ptab" aria-selected={panelTab === id} onClick={() => setPanelTab(id)}>
@@ -659,7 +681,7 @@ export function Workbench({
                   </button>
                 ))}
                 <div className="ptools">
-                  {apps.length > 0 && (
+                  {apps.length > 0 && panelTab !== "net" && (
                     <select className="target-select ltr" value={target} onChange={(e) => setTarget(e.target.value)} aria-label="برنامه">
                       {apps.map((a) => (
                         <option key={a.name}>{a.name}</option>
@@ -676,6 +698,9 @@ export function Workbench({
               </div>
               <div className="panel-body" hidden={panelTab !== "console"}>
                 {target ? <ConsolePane key={target} app={target} active={panelOpen && panelTab === "console"} /> : <div className="term-overlay">برنامه‌ای انتخاب نشده است.</div>}
+              </div>
+              <div className="panel-body" hidden={panelTab !== "net"}>
+                <NetPane active={panelOpen && panelTab === "net"} entries={netEntries} setEntries={setNetEntries} />
               </div>
               <div className="panel-body" hidden={panelTab !== "logs"}>
                 {target ? <LogsPane key={target} app={target} active={panelOpen && panelTab === "logs"} /> : <div className="term-overlay">برنامه‌ای انتخاب نشده است.</div>}

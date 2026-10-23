@@ -7,6 +7,8 @@ import { createLiaraClient, enc, type Project } from "../liara";
 import { appUrl } from "../monitor/evidence";
 import { probeUrl } from "../monitor/probe";
 import { domainGuide } from "../server/domains";
+import { auditNet } from "../server/audit";
+import { NET_HELP, runNetCommand, takeNetQuota } from "../server/nettools";
 import { checkApp, createRoutine, INTERVALS, listIncidents, listMonitors, listRoutines, upsertMonitor, uptime } from "../server/monitor";
 import { getPolicy } from "./policy";
 import { buildLogs, deployWorkspace } from "../server/deploy";
@@ -513,15 +515,34 @@ const domainGuideTool = defineTool({
   run: (a, ctx) => domainGuide(ctx.liara, a.domain, { app: a.app ?? ctx.app, recheck: a.recheck }),
 });
 
+const netTool = defineTool({
+  name: "netCheck",
+  description: `Run one network diagnostic from Yara's server against a PUBLIC host (sandboxed: no shell; private/internal addresses are refused). Use it to check DNS propagation, whether a site answers and how fast, certificate validity, whether a port is reachable, and domain registration/expiry.
+${NET_HELP}`,
+  schema: z.object({ command: z.string().min(2).max(300).describe("e.g. dig example.ir NS @google · http https://example.ir · tls example.ir · port example.ir 443 · whois example.ir") }),
+  kind: "read",
+  run: async (a, ctx) => {
+    if (!takeNetQuota(ctx.userId)) throw new Error("Rate limit: at most 30 network checks per minute.");
+    try {
+      const r = await runNetCommand(a.command);
+      auditNet(ctx.userId, ctx.threadId, "agent", r);
+      return r;
+    } catch (e) {
+      return { command: a.command, ok: false, output: e instanceof Error ? e.message : String(e) };
+    }
+  },
+});
+
 // ---------- per-agent tool sets ----------
 
 const ws = (names: string[]) => workspaceTools.filter((t) => names.includes(t.name));
 
 export const AGENT_TOOLS = {
-  supervisor: [updatePlan, getPlatformLimits, recommendAppPlanTool, getMonitoring, ...ws(["listWorkspaces"]), ...pick(liaraReadTools, ["listApps", "listVMs", "getAccountOverview"])],
+  supervisor: [updatePlan, getPlatformLimits, recommendAppPlanTool, getMonitoring, netTool, ...ws(["listWorkspaces"]), ...pick(liaraReadTools, ["listApps", "listVMs", "getAccountOverview"])],
   deploy: [
     probeApp,
     domainGuideTool,
+    netTool,
     setMonitor,
     ...ws(["listWorkspaces", "listFiles", "readFile", "searchCode", "detectProject", "runCommand", "writeFile", "editFile", "gitChanges"]),
     ...deployTools,
@@ -534,6 +555,7 @@ export const AGENT_TOOLS = {
   ],
   debug: [
     probeApp,
+    netTool,
     ...workspaceTools,
     ...deployTools.filter((t) => t.name === "getBuildLogs"),
     ...pick(liaraReadTools, ["getApp", "getAppLogs", "getAppReleases", "getAppEvents", "diagnoseApp", "searchLiaraDocs", "readLiaraDocsPage"]),
@@ -547,6 +569,7 @@ export const AGENT_TOOLS = {
     ...Object.values(liaraActionTools).filter((t) => t.name !== "deployRelease"),
     probeApp,
     domainGuideTool,
+    netTool,
     getMonitoring,
     setMonitor,
     scheduleRoutine,
