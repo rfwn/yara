@@ -18,6 +18,25 @@ type ActionDef<S extends z.ZodTypeAny> = {
 };
 const action = <S extends z.ZodTypeAny>(def: ActionDef<S>) => def;
 
+// g2 plans need a private network, sent as its _id (an omitted one fails with g2_plan_unavailable).
+// Same lookup as the CLI's promptNetwork/getNetwork, plus creating one when the account has none.
+type Network = { _id: string; name: string };
+async function resolveNetwork(c: LiaraClient, name?: string): Promise<Network> {
+  const list = async () => (await c.get<{ networks: Network[] }>("/v1/networks")).networks ?? [];
+  let networks = await list();
+  if (name) {
+    const found = networks.find((n) => n.name === name || n._id === name);
+    if (!found) throw new Error(`Network "${name}" not found. Available: ${networks.map((n) => n.name).join(", ") || "none"}.`);
+    return found;
+  }
+  if (!networks.length) {
+    await c.post("/v1/networks", { networkName: "default" });
+    networks = await list();
+    if (!networks.length) throw new Error("Could not create a private network, which g2 app plans require.");
+  }
+  return networks[0];
+}
+
 async function currentEnvs(c: LiaraClient, name: string) {
   const { project } = await c.get<{ project: Project }>(`/v1/projects/${enc(name)}`);
   return project.envs ?? [];
@@ -76,12 +95,13 @@ export const actions = {
       platform: z.enum(PLATFORMS),
       planID: z.string().min(1),
       bundlePlanID: z.string().optional().describe("Feature bundle (basic/standard/pro) from recommendAppPlan; defaults to the cheapest available"),
-      network: z.string().optional().describe("Private network name, if any"),
+      network: z.string().optional().describe("Private network name; defaults to the account's first network (one is created if there is none)"),
     }),
     run: async (c, i) => {
       const bundlePlanID = i.bundlePlanID ?? (await appPlanOptions(c)).bundles(i.planID)[0]?.id;
+      const network = await resolveNetwork(c, i.network);
       try {
-        await c.post("/v1/projects/", { name: i.name, platform: i.platform, planID: i.planID, bundlePlanID, network: i.network, readOnlyRootFilesystem: false });
+        await c.post("/v1/projects/", { name: i.name, platform: i.platform, planID: i.planID, bundlePlanID, network: network._id, readOnlyRootFilesystem: false });
       } catch (e) {
         // Same cases the CLI distinguishes (src/commands/app/create.ts).
         if (e instanceof LiaraError && e.status === 409) throw new Error(`The name "${i.name}" is already taken on Liara (names are global). Propose another name, e.g. "${i.name}-${Math.random().toString(36).slice(2, 6)}".`);
@@ -89,7 +109,7 @@ export const actions = {
         if (e instanceof LiaraError && e.status === 403) throw new Error(`Liara refused: ${e.message}. The free plan allows one app and not every platform; pick a paid plan.`);
         throw e;
       }
-      return { created: i.name, platform: i.platform, planID: i.planID, bundlePlanID, next: "Now deploy to it with deployWorkspace (same app name)." };
+      return { created: i.name, platform: i.platform, planID: i.planID, bundlePlanID, network: network.name, next: "Now deploy to it with deployWorkspace (same app name)." };
     },
   }),
   deleteApp: action({
