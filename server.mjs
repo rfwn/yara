@@ -61,7 +61,32 @@ wss.on("connection", (client, _req, session) => {
   const upstream = new WebSocket(url);
   const pending = [];
   let upstreamReady = false;
+  let upstreamStarted = false;
+  let upstreamInteractive = false;
   let readyTimer;
+  let flushTimer;
+
+  const isStartFrame = (message) => {
+    try {
+      return JSON.parse(message).action === "start";
+    } catch {
+      return false;
+    }
+  };
+  const startUpstream = () => {
+    if (!upstreamReady || upstreamStarted || upstream.readyState !== WebSocket.OPEN) return;
+    const startIndex = pending.findIndex(isStartFrame);
+    if (startIndex < 0) return;
+    upstreamStarted = true;
+    upstream.send(pending.splice(startIndex, 1)[0]);
+    // A resize can be emitted as soon as xterm mounts. Give Liara's PTY a
+    // moment to attach before forwarding that frame or any typed input.
+    flushTimer = setTimeout(() => {
+      upstreamInteractive = true;
+      if (client.readyState !== WebSocket.OPEN || upstream.readyState !== WebSocket.OPEN) return;
+      for (const m of pending.splice(0)) upstream.send(m);
+    }, 250);
+  };
 
   upstream.on("open", () => {
     // Liara's CLI waits one second after the WebSocket opens before sending
@@ -69,8 +94,7 @@ wss.on("connection", (client, _req, session) => {
     // session before its PTY is ready.
     readyTimer = setTimeout(() => {
       upstreamReady = true;
-      if (client.readyState !== WebSocket.OPEN || upstream.readyState !== WebSocket.OPEN) return;
-      for (const m of pending.splice(0)) upstream.send(m);
+      startUpstream();
     }, 1_000);
   });
   upstream.on("message", (data) => {
@@ -82,10 +106,12 @@ wss.on("connection", (client, _req, session) => {
   });
   upstream.on("error", () => {
     clearTimeout(readyTimer);
+    clearTimeout(flushTimer);
     if (client.readyState === WebSocket.OPEN) client.close(4001, "upstream-error");
   });
   upstream.on("close", (code, reason) => {
     clearTimeout(readyTimer);
+    clearTimeout(flushTimer);
     if (client.readyState !== WebSocket.OPEN) return;
     const detail = reason.toString().slice(0, 100);
     console.warn(`[shell] upstream closed (${code})${detail ? `: ${detail}` : ""}`);
@@ -94,11 +120,16 @@ wss.on("connection", (client, _req, session) => {
 
   client.on("message", (data) => {
     const text = data.toString();
-    if (upstreamReady && upstream.readyState === WebSocket.OPEN) upstream.send(text);
-    else pending.push(text);
+    if (upstreamInteractive && upstream.readyState === WebSocket.OPEN) {
+      upstream.send(text);
+      return;
+    }
+    pending.push(text);
+    startUpstream();
   });
   client.on("close", () => {
     clearTimeout(readyTimer);
+    clearTimeout(flushTimer);
     upstream.close();
   });
 });

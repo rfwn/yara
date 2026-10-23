@@ -85,7 +85,12 @@ export function ConsolePane({ app, active }: { app: string; active: boolean }) {
           if (yaraBusy.current) return;
           if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ type: "input", data: d }));
         });
-        term.onResize(({ cols, rows }) => wsRef.current?.readyState === WebSocket.OPEN && wsRef.current.send(JSON.stringify({ type: "resize", cols, rows })));
+        term.onResize(({ cols, rows }) => {
+          // A hidden or not-yet-laid-out terminal can briefly report 0 columns
+          // or rows. Liara treats that invalid PTY resize as a failed session.
+          if (cols < 2 || rows < 1 || wsRef.current?.readyState !== WebSocket.OPEN) return;
+          wsRef.current.send(JSON.stringify({ type: "resize", cols, rows }));
+        });
       }
       const term = termRef.current!;
       term.clear();
